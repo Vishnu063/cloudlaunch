@@ -34,5 +34,12 @@ pipeline {
                 '''
             }
         }
+
+        stage('Health Check') {
+            steps {
+                sh 'curl --fail --retry 5 --retry-connrefused --retry-delay 2 http://127.0.0.1:8080/'
+                echo 'Website health check passed'
+            }
+        }
     }
 }
