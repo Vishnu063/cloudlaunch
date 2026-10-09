@@ -20,7 +20,7 @@ pipeline {
             steps {
                 sh '''
                     cp site/index.html /tmp/cloudlaunch-index.html
-                    sudo docker cp /tmp/cloudlaunch-index.html cloudlaunch:/usr/share/nginx/html/index.html
+                    docker cp /tmp/cloudlaunch-index.html cloudlaunch:/usr/share/nginx/html/index.html
                     rm -f /tmp/cloudlaunch-index.html
                 '''
             }
