@@ -24,21 +24,38 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                sh '''
-                    docker rm -f cloudlaunch
-                    docker run -d \
-                      --name cloudlaunch \
-                      --restart unless-stopped \
-                      -p 127.0.0.1:8080:80 \
-                      cloudlaunch:latest
-                '''
-            }
-        }
+                script {
+                    sh 'docker tag cloudlaunch:latest cloudlaunch:new'
 
-        stage('Health Check') {
-            steps {
-                sh 'curl --fail --retry 5 --retry-connrefused --retry-delay 2 http://127.0.0.1:8080/'
-                echo 'Website health check passed'
+                    try {
+                        sh '''
+                            docker rm -f cloudlaunch || true
+                            docker run -d \
+                              --name cloudlaunch \
+                              --restart unless-stopped \
+                              -p 127.0.0.1:8080:80 \
+                              cloudlaunch:new
+
+                            sleep 5
+                            for i in 1 2 3 4 5; do
+                                curl --fail http://127.0.0.1:8080/ && exit 0
+                                sleep 2
+                            done
+                            exit 1
+                        '''
+                    } catch (err) {
+                        echo 'Deployment failed. Rolling back.'
+                        sh '''
+                            docker rm -f cloudlaunch || true
+                            docker run -d \
+                              --name cloudlaunch \
+                              --restart unless-stopped \
+                              -p 127.0.0.1:8080:80 \
+                              cloudlaunch:previous
+                        '''
+                        error('Deployment failed; rollback attempted.')
+                    }
+                }
             }
         }
     }
