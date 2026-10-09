@@ -9,19 +9,28 @@ pipeline {
             }
         }
 
-        stage('Validate Website') {
+        stage('Validate') {
             steps {
                 sh 'test -s site/index.html'
-                echo 'Website validation passed'
+                sh 'test -s Dockerfile'
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t cloudlaunch:latest .'
             }
         }
 
         stage('Deploy') {
             steps {
                 sh '''
-                    cp site/index.html /tmp/cloudlaunch-index.html
-                    docker cp /tmp/cloudlaunch-index.html cloudlaunch:/usr/share/nginx/html/index.html
-                    rm -f /tmp/cloudlaunch-index.html
+                    docker rm -f cloudlaunch
+                    docker run -d \
+                      --name cloudlaunch \
+                      --restart unless-stopped \
+                      -p 127.0.0.1:8080:80 \
+                      cloudlaunch:latest
                 '''
             }
         }
