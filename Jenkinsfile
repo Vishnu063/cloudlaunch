@@ -16,6 +16,16 @@ pipeline {
             }
         }
 
+        stage('Backup Previous Image') {
+            steps {
+                sh '''
+                    docker tag \
+                      "$(docker inspect --format='{{.Image}}' cloudlaunch)" \
+                      cloudlaunch:previous
+                '''
+            }
+        }
+
         stage('Build Image') {
             steps {
                 sh 'docker build -t cloudlaunch:latest .'
@@ -25,26 +35,25 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    sh 'docker tag cloudlaunch:latest cloudlaunch:new'
-
                     try {
                         sh '''
-                            docker rm -f cloudlaunch || true
+                            docker rm -f cloudlaunch
                             docker run -d \
                               --name cloudlaunch \
                               --restart unless-stopped \
                               -p 127.0.0.1:8080:80 \
-                              cloudlaunch:new
+                              cloudlaunch:latest
 
-                            sleep 5
-                            for i in 1 2 3 4 5; do
-                                curl --fail http://127.0.0.1:8080/ && exit 0
+                            for i in $(seq 1 15); do
+                                status=$(docker inspect \
+                                  --format='{{.State.Health.Status}}' cloudlaunch)
+                                [ "$status" = "healthy" ] && exit 0
                                 sleep 2
                             done
                             exit 1
                         '''
                     } catch (err) {
-                        echo 'Deployment failed. Rolling back.'
+                        echo 'Deployment failed; restoring previous image.'
                         sh '''
                             docker rm -f cloudlaunch || true
                             docker run -d \
