@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="CloudLaunch — modern cloud infrastructure and DevOps solutions.">
+  <title>CloudLaunch | Built for the Cloud</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0b1020;
+      color: #f4f7ff;
+      line-height: 1.6;
+    }
+    nav {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 22px max(6%, calc((100% - 1100px)/2));
+      border-bottom: 1px solid #27314b;
+    }
+    .logo { font-size: 22px; font-weight: 800; color: #7dd3fc; }
+    nav a { color: #cbd5e1; text-decoration: none; }
+    .hero {
+      max-width: 1100px; margin: auto; padding: 100px 24px 85px;
+      text-align: center;
+    }
+    .tag {
+      color: #7dd3fc; border: 1px solid #334155; border-radius: 30px;
+      padding: 7px 14px; display: inline-block; font-size: 14px;
+    }
+    h1 { font-size: clamp(38px, 7vw, 70px); line-height: 1.1; margin: 26px 0; }
+    h1 span { color: #7dd3fc; }
+    .hero p { color: #aab7d0; max-width: 650px; margin: 0 auto 30px; font-size: 18px; }
+    .button {
+      display: inline-block; background: #38bdf8; color: #07111f;
+      padding: 13px 23px; border-radius: 9px; font-weight: 750;
+      text-decoration: none;
+    }
+    section { max-width: 1100px; margin: auto; padding: 20px 24px 80px; }
+    h2 { font-size: 30px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 18px; }
+    .card { background: #131c31; border: 1px solid #273653; border-radius: 14px; padding: 24px; }
+    .card h3 { color: #7dd3fc; }
+    .card p { color: #aab7d0; }
+    footer { text-align: center; color: #94a3b8; border-top: 1px solid #27314b; padding: 25px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="logo">☁ CloudLaunch</div>
+    <a href="#services">Our platform</a>
+  </nav>
+  <main>
+    <div class="hero">
+      <span class="tag">CLOUD • AUTOMATION • RELIABILITY</span>
+      <h1>Build smarter.<br><span>Deploy faster.</span></h1>
+      <p>A modern cloud platform concept built to demonstrate reliable infrastructure, automated delivery, and scalable web technology.</p>
+      <a class="button" href="#services">Explore the platform →</a>
+    </div>
+    <section id="services">
+      <h2>Designed for modern teams</h2>
+      <div class="cards">
+        <article class="card">
+          <h3>☁ Cloud infrastructure</h3>
+          <p>Build repeatable environments and deploy applications on cloud infrastructure.</p>
+        </article>
+        <article class="card">
+          <h3>⚙ Automated delivery</h3>
+          <p>Prepare a streamlined path from source code to tested application releases.</p>
+        </article>
+        <article class="card">
+          <h3>📊 Reliability & visibility</h3>
+          <p>Lay the foundation for health checks, logs, monitoring, and operational insights.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>CloudLaunch · A cloud engineering project · 2026</footer>
+</body>
+</html>
