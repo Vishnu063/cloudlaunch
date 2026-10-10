@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pharmacy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pharmacy
+      POSTGRES_USER: pharmacy_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pharmacy_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pharmacy_user -d pharmacy"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pharmacy_internal
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pharmacy-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://pharmacy_user:${POSTGRES_PASSWORD}@db:5432/pharmacy
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?Set ADMIN_PASSWORD_HASH in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+    ports:
+      - "127.0.0.1:8082:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pharmacy_internal
+
+volumes:
+  pharmacy_data:
+
+networks:
+  pharmacy_internal:
+    driver: bridge

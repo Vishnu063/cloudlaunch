@@ -1,0 +1,26 @@
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Database backups
+pharmacy_backup_*.sql
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.venv/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Database backups
+pharmacy_backup_*.sql
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.venv/
