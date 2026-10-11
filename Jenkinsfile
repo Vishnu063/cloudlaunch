@@ -1,88 +1,70 @@
 pipeline {
     agent any
 
-    stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main',
-                    url: 'https://github.com/Vishnu063/cloudlaunch.git'
-            }
-        }
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
 
+    stages {
         stage('Validate') {
             steps {
                 sh '''
-                    test -s site/index.html
+                    set -eu
+                    test -s app/backend/main.py
+                    test -s app/static/index.html
                     test -s Dockerfile
+                    test -s compose.yml
+                    docker compose --env-file /home/ubuntu/cloudlaunch/.env \
+                      -p cloudlaunch -f compose.yml config -q
                 '''
             }
         }
 
-        stage('Backup Previous Image') {
-            steps {
-                sh '''
-                    docker tag \
-                      "$(docker inspect --format='{{.Image}}' cloudlaunch)" \
-                      cloudlaunch:previous
-                '''
-            }
-        }
-
-        stage('Build Image') {
-            steps {
-                sh 'docker build -t cloudlaunch:latest .'
-            }
-        }
-
-        stage('Deploy') {
+        stage('Deploy Pharmacy App') {
             steps {
                 script {
                     try {
                         sh '''
-                            docker rm -f cloudlaunch
+                            set -eu
+                            OLD_IMAGE=$(docker inspect --format='{{.Image}}' pharmacy-app)
+                            docker tag "$OLD_IMAGE" cloudlaunch-app:rollback
 
-                            docker run -d \
-                              --name cloudlaunch \
-                              --restart unless-stopped \
-                              -p 127.0.0.1:8080:80 \
-                              cloudlaunch:latest
+                            docker compose --env-file /home/ubuntu/cloudlaunch/.env \
+                              -p cloudlaunch -f compose.yml build app
 
-                            for i in $(seq 1 45); do
-                                status=$(docker inspect \
-                                  --format='{{.State.Health.Status}}' cloudlaunch)
-
-                                [ "$status" = "healthy" ] && exit 0
-                                [ "$status" = "unhealthy" ] && exit 1
-                                sleep 2
-                            done
-
-                            exit 1
+                            docker compose --env-file /home/ubuntu/cloudlaunch/.env \
+                              -p cloudlaunch -f compose.yml up -d --no-deps app
                         '''
+
+                        int result = sh(
+                            script: '''
+                                for i in $(seq 1 45); do
+                                    status=$(docker inspect \
+                                      --format='{{.State.Health.Status}}' pharmacy-app 2>/dev/null || echo missing)
+                                    [ "$status" = "healthy" ] && exit 0
+                                    [ "$status" = "unhealthy" ] && exit 1
+                                    sleep 2
+                                done
+                                exit 1
+                            ''',
+                            returnStatus: true
+                        )
+
+                        if (result != 0) {
+                            error('Pharmacy health check failed')
+                        }
+
+                        echo 'Pharmacy deployment successful.'
                     } catch (err) {
-                        echo 'Deployment failed. Rolling back.'
-
                         sh '''
-                            docker rm -f cloudlaunch || true
-
-                            docker run -d \
-                              --name cloudlaunch \
-                              --restart unless-stopped \
-                              -p 127.0.0.1:8080:80 \
-                              cloudlaunch:previous
-
-                            for i in $(seq 1 45); do
-                                status=$(docker inspect \
-                                  --format='{{.State.Health.Status}}' cloudlaunch)
-
-                                [ "$status" = "healthy" ] && exit 0
-                                [ "$status" = "unhealthy" ] && exit 1
-                                sleep 2
-                            done
-
-                            exit 1
+                            if docker image inspect cloudlaunch-app:rollback >/dev/null 2>&1; then
+                                docker tag cloudlaunch-app:rollback cloudlaunch-app
+                                docker compose --env-file /home/ubuntu/cloudlaunch/.env \
+                                  -p cloudlaunch -f compose.yml up -d --no-build --no-deps app
+                            fi
                         '''
-
-                        error('Deployment failed. Rollback attempted; check container health.')
+                        error("Deployment failed; rollback attempted. Check pharmacy-app logs. ${err}")
                     }
                 }
             }
