@@ -24,3 +24,8 @@ pharmacy_backup_*.sql
 __pycache__/
 *.py[cod]
 .venv/
+=
+[app]
+naming
+unpacking
+*.backup
