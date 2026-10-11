@@ -15,8 +15,34 @@ pipeline {
                     test -s app/static/index.html
                     test -s Dockerfile
                     test -s compose.yml
+                    test -s tests/conftest.py
+                    test -s tests/test_stock.py
+
                     docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                       -p cloudlaunch -f compose.yml config -q
+                '''
+            }
+        }
+
+        stage('Automated Tests') {
+            steps {
+                sh '''
+                    set -eu
+                    set +x
+
+                    POSTGRES_PASSWORD=$(grep '^POSTGRES_PASSWORD=' \
+                      /home/ubuntu/cloudlaunch/.env | cut -d= -f2-)
+                    test -n "$POSTGRES_PASSWORD"
+
+                    docker run --rm \
+                      --network cloudlaunch_pharmacy_internal \
+                      --env-file /home/ubuntu/cloudlaunch/.env \
+                      -e "DATABASE_URL=postgresql+psycopg://pharmacy_user:${POSTGRES_PASSWORD}@db:5432/pharmacy_test" \
+                      -e PYTHONPATH=/src \
+                      -v "$WORKSPACE:/src:ro" \
+                      -w /src \
+                      cloudlaunch-app \
+                      sh -c 'pip install -q pytest httpx && python -m pytest -q -p no:cacheprovider tests'
                 '''
             }
         }

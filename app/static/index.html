@@ -83,6 +83,7 @@ body.authenticated #loginScreen{display:none}
         <div class="field"><label for="batch_number">Batch number *</label><input id="batch_number" name="batch_number" required maxlength="100" placeholder="e.g. PCM-26001"></div>
         <div class="field"><label for="supplier">Supplier</label><input id="supplier" name="supplier" maxlength="160" placeholder="Supplier name"></div>
         <div class="field"><label for="quantity">Quantity (units) *</label><input id="quantity" name="quantity" type="number" min="0" step="1" required value="100"></div>
+        <div class="field hidden" id="stockReasonField"><label for="stock_change_reason">Reason for stock change *</label><input id="stock_change_reason" name="stock_change_reason" maxlength="200" placeholder="e.g. Physical stock recount"></div>
         <div class="field"><label for="reorder_level">Reorder level *</label><input id="reorder_level" name="reorder_level" type="number" min="0" step="1" required value="10"></div>
         <div class="field"><label for="unit_price">Unit price (₹) *</label><input id="unit_price" name="unit_price" type="number" min="0" step="0.01" required placeholder="0.00"></div>
         <div class="field"><label for="expiry_date">Expiry date *</label><input id="expiry_date" name="expiry_date" type="date" required></div>
@@ -125,12 +126,25 @@ function renderAlerts(){
  $('alertsList').innerHTML=alerts.slice(0,6).map(m=>{const s=status(m);return `<div class="alertrow"><div class="alertmark">${s[1]==='exp'?'◷':'⚑'}</div><div><strong>${esc(m.name)}</strong><p>${esc(m.batch_number)} · ${s[1]==='exp'?(daysTo(m.expiry_date)<0?'Expired':`Expires in ${daysTo(m.expiry_date)} days`):`${m.quantity} units remaining`}</p></div><span class="alertcount">${s[1]==='exp'?'Expiry':'Low stock'}</span></div>`}).join('');
 }
 function openModal(m=null){
- $('medicineForm').reset();$('formNotice').classList.add('hidden');$('medicineForm').dataset.editId=m?.id||'';
+ $('medicineForm').reset();$('formNotice').classList.add('hidden');
+ $('medicineForm').dataset.editId=m?.id||'';
+ $('medicineForm').dataset.originalQuantity=m?String(m.quantity):'';
+ $('stockReasonField').classList.add('hidden');
+ $('stock_change_reason').required=false;
+ $('stock_change_reason').value='';
  $('modalTitle').textContent=m?'Edit medicine':'Add medicine';$('saveBtn').textContent=m?'Update medicine':'Save medicine';
  $('expiry_date').min=new Date().toISOString().slice(0,10);
  if(m)for(const [k,v] of Object.entries(m)){const input=$('medicineForm').elements.namedItem(k);if(input)input.value=v}
  $('modal').classList.remove('hidden');$('name').focus();
 }
+$('quantity').addEventListener('input',()=>{
+ const form=$('medicineForm');
+ const changed=!!form.dataset.editId &&
+   Number($('quantity').value)!==Number(form.dataset.originalQuantity);
+ $('stockReasonField').classList.toggle('hidden',!changed);
+ $('stock_change_reason').required=changed;
+ if(!changed)$('stock_change_reason').value='';
+});
 function closeModal(){$('modal').classList.add('hidden')}
 $('addBtn').addEventListener('click',()=>openModal());
 $('closeModal').addEventListener('click',closeModal);$('cancelBtn').addEventListener('click',closeModal);

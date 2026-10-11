@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     create_engine, String, Integer, Date, Numeric, DateTime,
-    func, select
+    func, select, ForeignKey
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
 
@@ -50,6 +50,21 @@ class Medicine(Base):
     )
 
 
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    medicine_id: Mapped[int] = mapped_column(
+        ForeignKey("medicines.id", ondelete="CASCADE"), index=True
+    )
+    movement_type: Mapped[str] = mapped_column(String(30))
+    quantity_change: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class MedicineInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     category: str = Field(default="General", max_length=100)
@@ -59,6 +74,10 @@ class MedicineInput(BaseModel):
     unit_price: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
     expiry_date: date
     supplier: str = Field(default="", max_length=160)
+
+
+class MedicineUpdateInput(MedicineInput):
+    stock_change_reason: str | None = Field(default=None, max_length=200)
 
 
 def verify_password(password: str) -> bool:
@@ -178,6 +197,14 @@ def add_medicine(payload: MedicineInput, db: Session = Depends(get_db)):
     medicine = Medicine(**payload.model_dump())
     db.add(medicine)
     try:
+        db.flush()
+        if medicine.quantity > 0:
+            db.add(StockMovement(
+                medicine_id=medicine.id,
+                movement_type="opening",
+                quantity_change=medicine.quantity,
+                reason="Initial stock",
+            ))
         db.commit()
         db.refresh(medicine)
     except Exception as exc:
@@ -190,13 +217,40 @@ def add_medicine(payload: MedicineInput, db: Session = Depends(get_db)):
 
 @app.put("/api/medicines/{medicine_id}", dependencies=[Depends(require_admin)])
 def update_medicine(
-    medicine_id: int, payload: MedicineInput, db: Session = Depends(get_db)
+    medicine_id: int, payload: MedicineUpdateInput,
+    db: Session = Depends(get_db)
 ):
-    medicine = db.get(Medicine, medicine_id)
+    medicine = db.scalars(
+        select(Medicine)
+        .where(Medicine.id == medicine_id)
+        .with_for_update()
+    ).first()
     if medicine is None:
         raise HTTPException(status_code=404, detail="Medicine not found")
-    for key, value in payload.model_dump().items():
+    quantity_change = payload.quantity - medicine.quantity
+    reason = (payload.stock_change_reason or "").strip()
+
+    if quantity_change != 0 and len(reason) < 3:
+        raise HTTPException(
+            status_code=409,
+            detail="Provide a reason of at least 3 characters for the stock change",
+        )
+    if payload.expiry_date < date.today():
+        raise HTTPException(status_code=422, detail="Cannot set an expired batch")
+
+    for key, value in payload.model_dump(
+        exclude={"stock_change_reason"}
+    ).items():
         setattr(medicine, key, value)
+
+    if quantity_change != 0:
+        db.add(StockMovement(
+            medicine_id=medicine.id,
+            movement_type="adjustment",
+            quantity_change=quantity_change,
+            reason=reason,
+        ))
+
     try:
         db.commit()
     except Exception:
@@ -214,8 +268,99 @@ def delete_medicine(medicine_id: int, db: Session = Depends(get_db)):
     medicine = db.get(Medicine, medicine_id)
     if medicine is None:
         raise HTTPException(status_code=404, detail="Medicine not found")
+    movement_id = db.scalar(
+        select(StockMovement.id)
+        .where(StockMovement.medicine_id == medicine_id)
+        .limit(1)
+    )
+    if movement_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a medicine with stock movement history",
+        )
     db.delete(medicine)
     db.commit()
+
+
+class StockChangeInput(BaseModel):
+    change: int = Field(ge=-100000, le=100000)
+    reason: str = Field(min_length=3, max_length=200)
+
+
+@app.post(
+    "/api/medicines/{medicine_id}/stock",
+    dependencies=[Depends(require_admin)],
+)
+def adjust_stock(
+    medicine_id: int,
+    payload: StockChangeInput,
+    db: Session = Depends(get_db),
+):
+    if payload.change == 0:
+        raise HTTPException(status_code=422, detail="Change must not be zero")
+
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Reason must contain at least 3 non-space characters",
+        )
+
+    medicine = db.scalars(
+        select(Medicine)
+        .where(Medicine.id == medicine_id)
+        .with_for_update()
+    ).first()
+
+    if medicine is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+
+    new_quantity = medicine.quantity + payload.change
+    if new_quantity < 0:
+        raise HTTPException(status_code=409, detail="Stock cannot go below zero")
+
+    medicine.quantity = new_quantity
+    db.add(StockMovement(
+        medicine_id=medicine.id,
+        movement_type="adjustment",
+        quantity_change=payload.change,
+        reason=reason,
+    ))
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Stock adjustment failed")
+
+    return {"quantity": new_quantity}
+
+
+@app.get(
+    "/api/medicines/{medicine_id}/movements",
+    dependencies=[Depends(require_admin)],
+)
+def list_movements(medicine_id: int, db: Session = Depends(get_db)):
+    if db.get(Medicine, medicine_id) is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+
+    rows = db.scalars(
+        select(StockMovement)
+        .where(StockMovement.medicine_id == medicine_id)
+        .order_by(StockMovement.id.desc())
+        .limit(200)
+    ).all()
+
+    return [
+        {
+            "id": row.id,
+            "type": row.movement_type,
+            "change": row.quantity_change,
+            "reason": row.reason,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
 
 
 @app.get("/")
