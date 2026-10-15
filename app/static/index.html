@@ -1538,279 +1538,7 @@ content.querySelector('#salesBack').onclick=history;
      body{font:14px Arial,sans-serif;padding:25px}
      table{width:100%;border-collapse:collapse}
      td,th{border-bottom:1px solid #ddd;padding:9px;text-align:left}
-    </style></head><body>${html}<!-- PHARMACARE UX UPGRADE -->
-<script>
-/* PharmaCare UX Upgrade */
-(function () {
-  "use strict";
-
-  function init() {
-    const sidebar = document.querySelector(".sidebar");
-    const main = document.querySelector(".main");
-    if (!sidebar || !main || document.querySelector(".pharma-toolbar")) return;
-
-    const navItems = () => [...sidebar.querySelectorAll("button[data-view]")];
-    const clean = text => String(text || "").replace(/\s+/g, " ").trim();
-    const label = button => clean(button.textContent);
-    const ownerVisible = () =>
-      document.body.classList.contains("authenticated") &&
-      getComputedStyle(sidebar).display !== "none";
-
-    function navigate(view) {
-      if (!ownerVisible()) return;
-      const button = navItems().find(b => b.dataset.view === view);
-      if (!button) {
-        notify("This page is not available yet.");
-        return;
-      }
-      button.click();
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    let toastTimer;
-    function notify(message) {
-      let toast = document.querySelector(".pharma-toast");
-      if (!toast) {
-        toast = document.createElement("div");
-        toast.className = "pharma-toast";
-        toast.setAttribute("role", "status");
-        document.body.appendChild(toast);
-      }
-      toast.textContent = message;
-      toast.hidden = false;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toast.hidden = true; }, 3500);
-    }
-
-    function action(text, view, primary = false) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "pharma-action" + (primary ? " primary" : "");
-      button.textContent = text;
-      button.addEventListener("click", () => navigate(view));
-      return button;
-    }
-
-    // Persistent quick actions for everyday pharmacy tasks.
-    const toolbar = document.createElement("div");
-    toolbar.className = "pharma-toolbar";
-    toolbar.setAttribute("aria-label", "Quick pharmacy actions");
-
-    toolbar.appendChild(action("+ New Sale", "billing", true));
-    toolbar.appendChild(action("+ Add Medicine", "medicine-form"));
-    toolbar.appendChild(action("Inventory", "inventory"));
-    toolbar.appendChild(action("Alerts", "alerts"));
-
-    const searchButton = document.createElement("button");
-    searchButton.type = "button";
-    searchButton.className = "pharma-action";
-    searchButton.textContent = "⌕ Find page";
-    toolbar.appendChild(searchButton);
-
-    const topbar = main.querySelector(".topbar");
-    if (topbar) topbar.insertAdjacentElement("afterend", toolbar);
-    else main.prepend(toolbar);
-
-    // Dashboard shortcut card.
-    const quick = document.createElement("section");
-    quick.className = "pharma-quick-panel";
-    quick.innerHTML =
-      "<h2>Quick actions</h2>" +
-      "<p>Everything you need for everyday pharmacy work.</p>";
-    const grid = document.createElement("div");
-    grid.className = "pharma-quick-grid";
-    [
-      ["🧾 New Sale", "billing"],
-      ["💊 Add Medicine", "medicine-form"],
-      ["📦 Inventory", "inventory"],
-      ["🚚 Purchase Order", "purchase-orders"],
-      ["👥 Customers", "customers"],
-      ["⚠ Stock Alerts", "alerts"]
-    ].forEach(([text, view]) => grid.appendChild(action(text, view)));
-    quick.appendChild(grid);
-    toolbar.insertAdjacentElement("afterend", quick);
-
-    function syncDashboard() {
-      const current = sidebar.querySelector("button[data-view].active");
-      quick.classList.toggle(
-        "is-visible",
-        !!current && current.dataset.view === "overview"
-      );
-    }
-
-    // Search every existing navigation page without duplicating links.
-    const backdrop = document.createElement("div");
-    backdrop.className = "pharma-command-backdrop";
-    backdrop.setAttribute("role", "dialog");
-    backdrop.setAttribute("aria-modal", "true");
-    backdrop.setAttribute("aria-label", "Find a PharmaCare page");
-
-    const modal = document.createElement("div");
-    modal.className = "pharma-command";
-    const input = document.createElement("input");
-    input.type = "search";
-    input.placeholder = "Search inventory, billing, reports, settings...";
-    input.setAttribute("aria-label", "Search pages");
-
-    const results = document.createElement("div");
-    results.className = "pharma-command-results";
-
-    const hint = document.createElement("div");
-    hint.className = "pharma-command-hint";
-    hint.textContent = "Type to search • Enter to open first result • Esc to close";
-
-    modal.append(input, results, hint);
-    backdrop.appendChild(modal);
-    document.body.appendChild(backdrop);
-
-    function closeSearch() {
-      backdrop.classList.remove("open");
-      input.value = "";
-      searchButton.focus();
-    }
-
-    function renderResults() {
-      results.replaceChildren();
-      const q = input.value.toLocaleLowerCase().trim();
-
-      const matches = navItems()
-        .filter(b => !q || label(b).toLocaleLowerCase().includes(q))
-        .slice(0, 30);
-
-      for (const nav of matches) {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.textContent = label(nav);
-        item.addEventListener("click", () => {
-          closeSearch();
-          navigate(nav.dataset.view);
-        });
-        results.appendChild(item);
-      }
-
-      if (!matches.length) {
-        const empty = document.createElement("p");
-        empty.style.padding = "12px";
-        empty.textContent = "No matching page found.";
-        results.appendChild(empty);
-      }
-    }
-
-    function openSearch() {
-      if (!ownerVisible()) return;
-      renderResults();
-      backdrop.classList.add("open");
-      input.focus();
-    }
-
-    searchButton.addEventListener("click", openSearch);
-    input.addEventListener("input", renderResults);
-    input.addEventListener("keydown", e => {
-      if (e.key === "Enter") {
-        const first = results.querySelector("button");
-        if (first) first.click();
-      }
-    });
-    backdrop.addEventListener("click", e => {
-      if (e.target === backdrop) closeSearch();
-    });
-    document.addEventListener("keydown", e => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        if (ownerVisible()) {
-          e.preventDefault();
-          openSearch();
-        }
-      }
-      if (e.key === "Escape" && backdrop.classList.contains("open")) {
-        closeSearch();
-      }
-    });
-
-    // Live filtering for tables, without changing records or API queries.
-    function addTableFilters() {
-      document.querySelectorAll(".main .tablewrap").forEach(tablewrap => {
-        if (tablewrap.dataset.pharmaFilterReady) return;
-        if (!tablewrap.querySelector("table tbody")) return;
-
-        tablewrap.dataset.pharmaFilterReady = "1";
-
-        const filter = document.createElement("div");
-        filter.className = "pharma-table-filter";
-
-        const search = document.createElement("input");
-        search.type = "search";
-        search.placeholder = "Filter visible rows...";
-        search.setAttribute("aria-label", "Filter table rows");
-
-        const count = document.createElement("span");
-        count.className = "pharma-filter-count";
-
-        filter.append(search, count);
-        tablewrap.parentNode.insertBefore(filter, tablewrap);
-
-        const refresh = () => {
-          const q = search.value.toLocaleLowerCase().trim();
-          const rows = [...tablewrap.querySelectorAll("tbody tr")];
-          let shown = 0;
-          for (const row of rows) {
-            const match = !q || row.textContent.toLocaleLowerCase().includes(q);
-            row.style.display = match ? "" : "none";
-            if (match) shown++;
-          }
-          count.textContent = shown + " visible";
-        };
-
-        search.addEventListener("input", refresh);
-
-        const tbody = tablewrap.querySelector("tbody");
-        if (tbody) {
-          const observer = new MutationObserver(refresh);
-          observer.observe(tbody, { childList: true, subtree: true });
-        }
-        refresh();
-      });
-    }
-
-    // Keep active section visible and update dashboard shortcuts.
-    sidebar.addEventListener("click", e => {
-      if (e.target.closest("[data-view]")) {
-        setTimeout(syncDashboard, 0);
-      }
-    });
-
-    // Improves accessible feedback and native form validation.
-    document.querySelectorAll("input, select, textarea").forEach(field => {
-      if (!field.hasAttribute("autocomplete") &&
-          field.type === "password") {
-        field.setAttribute("autocomplete", "current-password");
-      }
-    });
-
-    // Dynamic pages may create new tables after navigation.
-    let queued = false;
-    const observer = new MutationObserver(() => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        addTableFilters();
-        syncDashboard();
-      });
-    });
-    observer.observe(main, { childList: true, subtree: true });
-
-    addTableFilters();
-    syncDashboard();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-})();
-
-</script>
+    </style></head><body>${html}
 </body></html>`);
    w.document.close();
    w.focus();
@@ -3528,6 +3256,280 @@ startSession();
 })();
 </script>
 
+
+<!-- PHARMACARE UX UPGRADE -->
+<script>
+/* PharmaCare UX Upgrade */
+(function () {
+  "use strict";
+
+  function init() {
+    const sidebar = document.querySelector(".sidebar");
+    const main = document.querySelector(".main");
+    if (!sidebar || !main || document.querySelector(".pharma-toolbar")) return;
+
+    const navItems = () => [...sidebar.querySelectorAll("button[data-view]")];
+    const clean = text => String(text || "").replace(/\s+/g, " ").trim();
+    const label = button => clean(button.textContent);
+    const ownerVisible = () =>
+      document.body.classList.contains("authenticated") &&
+      getComputedStyle(sidebar).display !== "none";
+
+    function navigate(view) {
+      if (!ownerVisible()) return;
+      const button = navItems().find(b => b.dataset.view === view);
+      if (!button) {
+        notify("This page is not available yet.");
+        return;
+      }
+      button.click();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    let toastTimer;
+    function notify(message) {
+      let toast = document.querySelector(".pharma-toast");
+      if (!toast) {
+        toast = document.createElement("div");
+        toast.className = "pharma-toast";
+        toast.setAttribute("role", "status");
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.hidden = true; }, 3500);
+    }
+
+    function action(text, view, primary = false) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "pharma-action" + (primary ? " primary" : "");
+      button.textContent = text;
+      button.addEventListener("click", () => navigate(view));
+      return button;
+    }
+
+    // Persistent quick actions for everyday pharmacy tasks.
+    const toolbar = document.createElement("div");
+    toolbar.className = "pharma-toolbar";
+    toolbar.setAttribute("aria-label", "Quick pharmacy actions");
+
+    toolbar.appendChild(action("+ New Sale", "billing", true));
+    toolbar.appendChild(action("+ Add Medicine", "medicine-form"));
+    toolbar.appendChild(action("Inventory", "inventory"));
+    toolbar.appendChild(action("Alerts", "alerts"));
+
+    const searchButton = document.createElement("button");
+    searchButton.type = "button";
+    searchButton.className = "pharma-action";
+    searchButton.textContent = "⌕ Find page";
+    toolbar.appendChild(searchButton);
+
+    const topbar = main.querySelector(".topbar");
+    if (topbar) topbar.insertAdjacentElement("afterend", toolbar);
+    else main.prepend(toolbar);
+
+    // Dashboard shortcut card.
+    const quick = document.createElement("section");
+    quick.className = "pharma-quick-panel";
+    quick.innerHTML =
+      "<h2>Quick actions</h2>" +
+      "<p>Everything you need for everyday pharmacy work.</p>";
+    const grid = document.createElement("div");
+    grid.className = "pharma-quick-grid";
+    [
+      ["🧾 New Sale", "billing"],
+      ["💊 Add Medicine", "medicine-form"],
+      ["📦 Inventory", "inventory"],
+      ["🚚 Purchase Order", "purchase-orders"],
+      ["👥 Customers", "customers"],
+      ["⚠ Stock Alerts", "alerts"]
+    ].forEach(([text, view]) => grid.appendChild(action(text, view)));
+    quick.appendChild(grid);
+    toolbar.insertAdjacentElement("afterend", quick);
+
+    function syncDashboard() {
+      const current = sidebar.querySelector("button[data-view].active");
+      quick.classList.toggle(
+        "is-visible",
+        !!current && current.dataset.view === "overview"
+      );
+    }
+
+    // Search every existing navigation page without duplicating links.
+    const backdrop = document.createElement("div");
+    backdrop.className = "pharma-command-backdrop";
+    backdrop.setAttribute("role", "dialog");
+    backdrop.setAttribute("aria-modal", "true");
+    backdrop.setAttribute("aria-label", "Find a PharmaCare page");
+
+    const modal = document.createElement("div");
+    modal.className = "pharma-command";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.placeholder = "Search inventory, billing, reports, settings...";
+    input.setAttribute("aria-label", "Search pages");
+
+    const results = document.createElement("div");
+    results.className = "pharma-command-results";
+
+    const hint = document.createElement("div");
+    hint.className = "pharma-command-hint";
+    hint.textContent = "Type to search • Enter to open first result • Esc to close";
+
+    modal.append(input, results, hint);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    function closeSearch() {
+      backdrop.classList.remove("open");
+      input.value = "";
+      searchButton.focus();
+    }
+
+    function renderResults() {
+      results.replaceChildren();
+      const q = input.value.toLocaleLowerCase().trim();
+
+      const matches = navItems()
+        .filter(b => !q || label(b).toLocaleLowerCase().includes(q))
+        .slice(0, 30);
+
+      for (const nav of matches) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.textContent = label(nav);
+        item.addEventListener("click", () => {
+          closeSearch();
+          navigate(nav.dataset.view);
+        });
+        results.appendChild(item);
+      }
+
+      if (!matches.length) {
+        const empty = document.createElement("p");
+        empty.style.padding = "12px";
+        empty.textContent = "No matching page found.";
+        results.appendChild(empty);
+      }
+    }
+
+    function openSearch() {
+      if (!ownerVisible()) return;
+      renderResults();
+      backdrop.classList.add("open");
+      input.focus();
+    }
+
+    searchButton.addEventListener("click", openSearch);
+    input.addEventListener("input", renderResults);
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        const first = results.querySelector("button");
+        if (first) first.click();
+      }
+    });
+    backdrop.addEventListener("click", e => {
+      if (e.target === backdrop) closeSearch();
+    });
+    document.addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        if (ownerVisible()) {
+          e.preventDefault();
+          openSearch();
+        }
+      }
+      if (e.key === "Escape" && backdrop.classList.contains("open")) {
+        closeSearch();
+      }
+    });
+
+    // Live filtering for tables, without changing records or API queries.
+    function addTableFilters() {
+      document.querySelectorAll(".main .tablewrap").forEach(tablewrap => {
+        if (tablewrap.dataset.pharmaFilterReady) return;
+        if (!tablewrap.querySelector("table tbody")) return;
+
+        tablewrap.dataset.pharmaFilterReady = "1";
+
+        const filter = document.createElement("div");
+        filter.className = "pharma-table-filter";
+
+        const search = document.createElement("input");
+        search.type = "search";
+        search.placeholder = "Filter visible rows...";
+        search.setAttribute("aria-label", "Filter table rows");
+
+        const count = document.createElement("span");
+        count.className = "pharma-filter-count";
+
+        filter.append(search, count);
+        tablewrap.parentNode.insertBefore(filter, tablewrap);
+
+        const refresh = () => {
+          const q = search.value.toLocaleLowerCase().trim();
+          const rows = [...tablewrap.querySelectorAll("tbody tr")];
+          let shown = 0;
+          for (const row of rows) {
+            const match = !q || row.textContent.toLocaleLowerCase().includes(q);
+            row.style.display = match ? "" : "none";
+            if (match) shown++;
+          }
+          count.textContent = shown + " visible";
+        };
+
+        search.addEventListener("input", refresh);
+
+        const tbody = tablewrap.querySelector("tbody");
+        if (tbody) {
+          const observer = new MutationObserver(refresh);
+          observer.observe(tbody, { childList: true, subtree: true });
+        }
+        refresh();
+      });
+    }
+
+    // Keep active section visible and update dashboard shortcuts.
+    sidebar.addEventListener("click", e => {
+      if (e.target.closest("[data-view]")) {
+        setTimeout(syncDashboard, 0);
+      }
+    });
+
+    // Improves accessible feedback and native form validation.
+    document.querySelectorAll("input, select, textarea").forEach(field => {
+      if (!field.hasAttribute("autocomplete") &&
+          field.type === "password") {
+        field.setAttribute("autocomplete", "current-password");
+      }
+    });
+
+    // Dynamic pages may create new tables after navigation.
+    let queued = false;
+    const observer = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        addTableFilters();
+        syncDashboard();
+      });
+    });
+    observer.observe(main, { childList: true, subtree: true });
+
+    addTableFilters();
+    syncDashboard();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+
+</script>
 </body>
 </html>\n
 
