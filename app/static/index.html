@@ -3159,7 +3159,7 @@ async function startSession(){
   const r=await fetch('/pharmacy/api/auth');
   if(!r.ok)throw Error('Unable to check login status');
   const data=await r.json();
-  if(data.authenticated)showDashboard();
+  if(data.authenticated && data.role==='owner')showDashboard();
  }catch(e){
   $('loginError').textContent='Cannot connect to the application. Please refresh and try again.';
  }
@@ -3564,95 +3564,6 @@ startSession();
 })();
 
 </script>
-</body>
-</html>\n
-
-<script>
-(() => {
-  const escapeText = value => String(value ?? "").replace(
-    /[&<>"']/g, c => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;",
-      '"':"&quot;","'":"&#39;"
-    }[c])
-  );
-
-  async function openStaffWorkspace(user) {
-    if(document.getElementById("pcStaffWorkspace")) return;
-
-    const panel=document.createElement("main");
-    panel.id="pcStaffWorkspace";
-    panel.style.cssText=
-      "position:fixed;inset:0;z-index:99998;background:#f5f7fa;" +
-      "color:#182536;overflow:auto;padding:24px";
-
-    panel.innerHTML=`
-      <div style="max-width:1100px;margin:auto">
-        <header style="display:flex;justify-content:space-between;
-          align-items:center;gap:12px;flex-wrap:wrap">
-          <div>
-            <h1>PharmaCare Staff</h1>
-            <p>${escapeText(user.username || "")}
-              — ${escapeText(user.role || "")}</p>
-          </div>
-          <button type="button" id="pcStaffLogout"
-            class="btn secondary">Sign out</button>
-        </header>
-        <h2 style="margin-top:28px">Medicine Inventory</h2>
-        <p>Read-only inventory access. Other operations require
-          role-specific authorization.</p>
-        <div id="pcStaffInventory">Loading inventory...</div>
-      </div>`;
-
-    document.body.appendChild(panel);
-
-    panel.querySelector("#pcStaffLogout").onclick=async()=>{
-      try {
-        await fetch("/pharmacy/api/logout",{
-          method:"POST",credentials:"same-origin"
-        });
-      }finally{
-        location.reload();
-      }
-    };
-
-    try{
-      const response=await fetch("/pharmacy/api/staff/inventory",{
-        credentials:"same-origin"
-      });
-      if(!response.ok) throw Error("Inventory unavailable: "+response.status);
-      const rows=await response.json();
-
-      panel.querySelector("#pcStaffInventory").innerHTML=
-        `<div class="tablewrap"><table>
-          <thead><tr><th>Medicine</th><th>Batch</th>
-          <th>Stock</th><th>Expiry</th><th>Unit price</th></tr></thead>
-          <tbody>${rows.map(m=>`<tr>
-            <td>${escapeText(m.name)}</td>
-            <td>${escapeText(m.batch_number)}</td>
-            <td>${escapeText(m.quantity)}</td>
-            <td>${escapeText(m.expiry_date)}</td>
-            <td>${escapeText(m.unit_price)}</td>
-          </tr>`).join("")}</tbody></table></div>`;
-    }catch(err){
-      panel.querySelector("#pcStaffInventory").textContent=err.message;
-    }
-  }
-
-  document.addEventListener("pharmacare-staff-login",event=>{
-    openStaffWorkspace(event.detail);
-  });
-
-  // Restore the restricted staff view after a page refresh.
-  fetch("/pharmacy/api/auth",{credentials:"same-origin"})
-    .then(r=>r.ok?r.json():null)
-    .then(auth=>{
-      if(auth?.authenticated && auth.role && auth.role!=="owner"){
-        openStaffWorkspace(auth);
-      }
-    })
-    .catch(()=>{});
-})();
-</script>
 
 <!-- PHARMACARE USERS AND ROLES -->
 <script>
@@ -3968,4 +3879,6 @@ startSession();
   }, true);
 })();
 </script>
-\n
+<script src="/pharmacy/static/pharmacare-extensions.js" defer></script>
+</body>
+</html>\n
