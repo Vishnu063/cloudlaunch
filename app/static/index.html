@@ -318,6 +318,7 @@ table th { position: sticky; top: 0; z-index: 1; }
 </nav>
 <div class="navlabel">REPORTS</div><nav class="nav">
 <button data-view="sales-report"><span class="ico">▥</span>Sales report</button>
+<button data-view="gst-report"><span class="ico">₹</span>GST & refunds report</button>
 <button data-view="valuation"><span class="ico">₹</span>Inventory valuation</button>
 <button data-view="movement-report"><span class="ico">↔</span>Stock movement report</button>
 <button data-view="expiry-report"><span class="ico">◷</span>Expiry / wastage report</button>
@@ -1470,17 +1471,19 @@ async function openSalesScreen(mode='billing'){
   content.innerHTML=`
    <div id="receiptArea">
     <h3>PharmaCare — Sales Receipt</h3>
-    <p><strong>Receipt:</strong> #${s.id}</p>
+    <p><strong>Invoice:</strong> ${esc(s.invoice_number || "#"+s.id)}</p>
     <p><strong>Date:</strong> ${esc(s.created_at?
      new Date(s.created_at).toLocaleString('en-IN'):'—')}</p>
     <div class="tablewrap"><table>
-     <thead><tr><th>Medicine</th><th>Batch</th>
-      <th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+     <thead><tr><th>Medicine / HSN</th><th>Batch</th>
+      <th>Qty</th><th>Price</th><th>Discount</th><th>GST %</th><th>Amount</th></tr></thead>
      <tbody>${s.items.map(i=>`<tr>
-      <td>${esc(i.medicine)}</td>
+      <td>${esc(i.medicine)}<small style="display:block">HSN: ${esc(i.hsn_code||'Not supplied')}</small></td>
       <td>${esc(i.batch_number)}</td>
       <td>${i.quantity}</td>
       <td>${money(i.unit_price)}</td>
+      <td>${money(i.discount_amount)}</td>
+      <td>${esc(i.gst_rate)}%</td>
       <td>${money(i.line_total)}</td>
      </tr>`).join('')}</tbody>
     </table></div>
@@ -1590,6 +1593,14 @@ content.querySelector('#salesBack').onclick=history;
   );
   content.innerHTML=`<form id="salesForm">
    <div id="saleItems"></div>
+   <div class="field" style="margin:12px 0">
+     <label for="saleCustomer">Customer (optional)</label>
+     <select id="saleCustomer"><option value="">Walk-in customer</option></select>
+   </div>
+   <label style="display:block;margin:12px 0">
+    <input type="checkbox" id="saleAutoFefo" checked>
+    Automatically allocate earliest-expiring batches (FEFO)
+   </label>
   <label style="display:block;margin:12px 0">
     <input type="checkbox" id="saleInterstate"> Interstate sale (IGST)
   </label>
@@ -1604,6 +1615,16 @@ content.querySelector('#salesBack').onclick=history;
 
   const items=content.querySelector('#saleItems');
   const total=content.querySelector('#saleTotal');
+  request('/api/customers').then(customers=>{
+   const field=content.querySelector('#saleCustomer');
+   if(!field)return;
+   customers.forEach(c=>{
+    const option=document.createElement('option');
+    option.value=c.id;
+    option.textContent=c.name+(c.phone?' — '+c.phone:'');
+    field.appendChild(option);
+   });
+  }).catch(()=>{});
 
   function calculate(){
    let sum=0;
@@ -1641,9 +1662,13 @@ content.querySelector('#salesBack').onclick=history;
       <input type="number" class="saleGst" min="0" max="100"
         step="0.01" value="0" required>
     </div>
-    <div class="field"><label>Discount ₹</label>
+    <div class="field"><label>Discount ₹ (line total)</label>
       <input type="number" class="saleDiscount" min="0"
         step="0.01" value="0" required>
+    </div>
+    <div class="field"><label>HSN code (verify before invoicing)</label>
+      <input type="text" class="saleHsn" maxlength="20"
+        placeholder="Enter verified HSN">
     </div>
     <div class="field"><label>Remove</label>
      <button type="button" class="btn secondary saleRemove">Remove</button>
@@ -1668,7 +1693,8 @@ content.querySelector('#salesBack').onclick=history;
     medicine_id:Number(row.querySelector('.saleMedicine').value),
     quantity:Number(row.querySelector('.saleQty').value),
     gst_rate:row.querySelector('.saleGst').value,
-    discount_amount:row.querySelector('.saleDiscount').value
+    discount_amount:row.querySelector('.saleDiscount').value,
+    hsn_code:row.querySelector('.saleHsn').value.trim()||null
    }));
    if(!rows.length || rows.some(x=>!x.medicine_id||
       !Number.isSafeInteger(x.quantity)||x.quantity<1||
@@ -1678,11 +1704,11 @@ content.querySelector('#salesBack').onclick=history;
     error.classList.remove('hidden');
     return;
    }
-   if(rows.some(x=>{
+   if(!content.querySelector('#saleAutoFefo').checked && rows.some(x=>{
     const m=available.find(a=>a.id===x.medicine_id);
     return !m||x.quantity>m.quantity;
    })){
-    error.textContent='Insufficient stock for one or more medicines.';
+    error.textContent='Insufficient stock for one or more batches.';
     error.classList.remove('hidden');
     return;
    }
@@ -1690,11 +1716,21 @@ content.querySelector('#salesBack').onclick=history;
    const button=content.querySelector('#saleSubmit');
    button.disabled=true;
    try{
+    let saleItems=rows;
+    if(content.querySelector('#saleAutoFefo').checked){
+     const plan=await request('/api/sales/fefo-plan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({items:rows})
+     });
+     saleItems=plan.items;
+    }
     const sale=await request('/api/sales',{
      method:'POST',
      headers:{'Content-Type':'application/json'},
      body:JSON.stringify({
-      items:rows,
+      items:saleItems,
+      customer_id:Number(content.querySelector('#saleCustomer').value)||null,
       interstate:content.querySelector('#saleInterstate').checked
     })
     });
@@ -1802,8 +1838,27 @@ async function openReturnsScreen(){
     </tr>`).join('')}</tbody></table></div>
    <div class="formactions">
     <button class="btn secondary" type="button" id="returnBack">Back</button>
+    <button class="btn secondary" type="button" id="returnDraftCredit">Draft credit note</button>
    </div>`;
   content.querySelector('#returnBack').onclick=showList;
+  content.querySelector('#returnDraftCredit').onclick=async()=>{
+   const button=content.querySelector('#returnDraftCredit');
+   button.disabled=true;
+   try{
+    const note=await request('/api/returns/'+id+'/credit-note');
+    const breakdown=note.tax_breakdown.totals;
+    const container=document.createElement('section');
+    container.className='notice';
+    container.style.marginTop='15px';
+    container.textContent='Draft '+note.draft_number+' / Invoice '+
+      (note.original_invoice||'—')+' — Taxable '+money(breakdown.taxable)+
+      ', CGST '+money(breakdown.cgst)+', SGST '+money(breakdown.sgst)+
+      ', IGST '+money(breakdown.igst)+', Refund '+money(breakdown.refund)+
+      '. '+note.notice;
+    button.parentNode.appendChild(container);
+   }catch(error){alert(error.message)}
+   finally{button.disabled=false}
+  };
  }
 
  function showForm(){
@@ -3125,7 +3180,7 @@ async function startSession(){
   const r=await fetch('/pharmacy/api/auth');
   if(!r.ok)throw Error('Unable to check login status');
   const data=await r.json();
-  if(data.authenticated)showDashboard();
+  if(data.authenticated && data.role==='owner')showDashboard();
  }catch(e){
   $('loginError').textContent='Cannot connect to the application. Please refresh and try again.';
  }
@@ -3530,95 +3585,6 @@ startSession();
 })();
 
 </script>
-</body>
-</html>\n
-
-<script>
-(() => {
-  const escapeText = value => String(value ?? "").replace(
-    /[&<>"']/g, c => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;",
-      '"':"&quot;","'":"&#39;"
-    }[c])
-  );
-
-  async function openStaffWorkspace(user) {
-    if(document.getElementById("pcStaffWorkspace")) return;
-
-    const panel=document.createElement("main");
-    panel.id="pcStaffWorkspace";
-    panel.style.cssText=
-      "position:fixed;inset:0;z-index:99998;background:#f5f7fa;" +
-      "color:#182536;overflow:auto;padding:24px";
-
-    panel.innerHTML=`
-      <div style="max-width:1100px;margin:auto">
-        <header style="display:flex;justify-content:space-between;
-          align-items:center;gap:12px;flex-wrap:wrap">
-          <div>
-            <h1>PharmaCare Staff</h1>
-            <p>${escapeText(user.username || "")}
-              — ${escapeText(user.role || "")}</p>
-          </div>
-          <button type="button" id="pcStaffLogout"
-            class="btn secondary">Sign out</button>
-        </header>
-        <h2 style="margin-top:28px">Medicine Inventory</h2>
-        <p>Read-only inventory access. Other operations require
-          role-specific authorization.</p>
-        <div id="pcStaffInventory">Loading inventory...</div>
-      </div>`;
-
-    document.body.appendChild(panel);
-
-    panel.querySelector("#pcStaffLogout").onclick=async()=>{
-      try {
-        await fetch("/pharmacy/api/logout",{
-          method:"POST",credentials:"same-origin"
-        });
-      }finally{
-        location.reload();
-      }
-    };
-
-    try{
-      const response=await fetch("/pharmacy/api/staff/inventory",{
-        credentials:"same-origin"
-      });
-      if(!response.ok) throw Error("Inventory unavailable: "+response.status);
-      const rows=await response.json();
-
-      panel.querySelector("#pcStaffInventory").innerHTML=
-        `<div class="tablewrap"><table>
-          <thead><tr><th>Medicine</th><th>Batch</th>
-          <th>Stock</th><th>Expiry</th><th>Unit price</th></tr></thead>
-          <tbody>${rows.map(m=>`<tr>
-            <td>${escapeText(m.name)}</td>
-            <td>${escapeText(m.batch_number)}</td>
-            <td>${escapeText(m.quantity)}</td>
-            <td>${escapeText(m.expiry_date)}</td>
-            <td>${escapeText(m.unit_price)}</td>
-          </tr>`).join("")}</tbody></table></div>`;
-    }catch(err){
-      panel.querySelector("#pcStaffInventory").textContent=err.message;
-    }
-  }
-
-  document.addEventListener("pharmacare-staff-login",event=>{
-    openStaffWorkspace(event.detail);
-  });
-
-  // Restore the restricted staff view after a page refresh.
-  fetch("/pharmacy/api/auth",{credentials:"same-origin"})
-    .then(r=>r.ok?r.json():null)
-    .then(auth=>{
-      if(auth?.authenticated && auth.role && auth.role!=="owner"){
-        openStaffWorkspace(auth);
-      }
-    })
-    .catch(()=>{});
-})();
-</script>
 
 <!-- PHARMACARE USERS AND ROLES -->
 <script>
@@ -3934,4 +3900,6 @@ startSession();
   }, true);
 })();
 </script>
-\n
+<script src="/pharmacy/static/pharmacare-extensions.js" defer></script>
+</body>
+</html>\n

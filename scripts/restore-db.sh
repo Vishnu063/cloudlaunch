@@ -24,7 +24,7 @@ esac
 
 echo "Checking backup archive..."
 
-sudo docker compose exec -T db sh -c \
+sudo docker compose -p cloudlaunch exec -T db sh -c \
   'exec pg_restore -l >/dev/null' < "$BACKUP"
 
 echo
@@ -44,11 +44,11 @@ echo "Creating a pre-restore safety backup..."
 bash scripts/backup-db.sh
 
 echo "Stopping application during restore..."
-sudo docker compose stop app
+sudo docker compose -p cloudlaunch stop app
 
 echo "Restoring PostgreSQL database..."
 
-if docker compose exec -T db sh -c \
+if sudo docker compose -p cloudlaunch exec -T db sh -c \
   'exec pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error' \
   < "$BACKUP"; then
   echo "Database restore completed."
@@ -59,7 +59,7 @@ else
 fi
 
 echo "Starting application..."
-sudo docker compose start app
+sudo docker compose -p cloudlaunch start app
 
 echo "SUCCESS: Restore completed."
 echo "Check application health before resuming use."
