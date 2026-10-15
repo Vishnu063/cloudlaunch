@@ -15,13 +15,13 @@ trap 'rm -f "$TEMP"' EXIT
 
 echo "Creating PostgreSQL backup..."
 
-sudo docker compose exec -T db sh -c \
+sudo docker compose -p cloudlaunch exec -T db sh -c \
   'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
   > "$TEMP"
 
 test -s "$TEMP"
 
-sudo docker compose exec -T db sh -c \
+sudo docker compose -p cloudlaunch exec -T db sh -c \
   'exec pg_restore -l >/dev/null' < "$TEMP"
 
 mv "$TEMP" "$FILE"
