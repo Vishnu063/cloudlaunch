@@ -144,24 +144,74 @@ def health():
 
 @app.get("/api/auth")
 def auth_status(request: Request):
-    return {"authenticated": request.session.get("admin") is True}
+    if request.session.get("admin") is True:
+        require_admin(request)
+        return {"authenticated": True, "role": "owner"}
+
+    staff_id = request.session.get("staff_id")
+    if staff_id:
+        with SessionLocal() as db:
+            staff = db.get(StaffUser, staff_id)
+
+            if (
+                staff
+                and staff.active
+                and request.session.get("staff_version")
+                    == staff.session_version
+            ):
+                return {
+                    "authenticated": True,
+                    "role": staff.role,
+                    "username": staff.username,
+                }
+
+    return {"authenticated": False}
 
 
 class LoginInput(BaseModel):
     password: str = Field(min_length=1, max_length=256)
+    username: str | None = Field(default=None, max_length=80)
 
 
 @app.post("/api/login")
 def login(payload: LoginInput, request: Request):
-    if not verify_active_password(payload.password):
-        raise HTTPException(status_code=401, detail="Invalid password")
-    request.session.clear()
-    request.session["admin"] = True
+    username = (payload.username or "").strip().lower()
+
+    if not username:
+        if not verify_active_password(payload.password):
+            raise HTTPException(401, "Invalid credentials")
+
+        request.session.clear()
+        request.session["admin"] = True
+
+        with SessionLocal() as db:
+            credential = db.get(AdminCredential, 1)
+            if credential is not None:
+                request.session["auth_version"] = credential.session_version
+
+        return {"authenticated": True, "role": "owner"}
+
     with SessionLocal() as db:
-        credential = db.get(AdminCredential, 1)
-        if credential is not None:
-            request.session["auth_version"] = credential.session_version
-    return {"authenticated": True}
+        staff = db.scalar(
+            select(StaffUser).where(StaffUser.username == username)
+        )
+
+        if (
+            staff is None
+            or not staff.active
+            or not check_hash(payload.password, staff.password_hash)
+        ):
+            raise HTTPException(401, "Invalid credentials")
+
+        request.session.clear()
+        request.session["staff_id"] = staff.id
+        request.session["staff_version"] = staff.session_version
+
+        return {
+            "authenticated": True,
+            "role": staff.role,
+            "username": staff.username,
+        }
 
 
 @app.post("/api/logout")
@@ -1888,6 +1938,221 @@ def finance_summary(db: Session = Depends(get_db)):
 
 
 # ===== End PharmaCare Batch 1 =====
+
+
+
+# ===== Staff Accounts and Roles =====
+
+class StaffUser(Base):
+    __tablename__ = "staff_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(160))
+    role: Mapped[str] = mapped_column(String(30))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(default=True)
+    session_version: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+STAFF_ROLES = {"manager", "pharmacist", "cashier", "inventory"}
+
+
+class StaffCreateInput(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+    display_name: str = Field(min_length=1, max_length=160)
+    role: str
+    password: str = Field(min_length=12, max_length=128)
+
+
+class StaffUpdateInput(BaseModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    role: str
+    active: bool
+
+
+class StaffPasswordInput(BaseModel):
+    password: str = Field(min_length=12, max_length=128)
+
+
+def staff_details(user):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "display_name": user.display_name,
+        "role": user.role,
+        "active": user.active,
+    }
+
+
+def validate_staff_role(role):
+    if role not in STAFF_ROLES:
+        raise HTTPException(422, "Invalid staff role")
+
+
+@app.get("/api/users", dependencies=[Depends(require_admin)])
+def list_staff_users(db: Session = Depends(get_db)):
+    users = db.scalars(
+        select(StaffUser).order_by(StaffUser.id)
+    ).all()
+    return [staff_details(user) for user in users]
+
+
+@app.post("/api/users", status_code=201,
+          dependencies=[Depends(require_admin)])
+def create_staff_user(
+    payload: StaffCreateInput,
+    db: Session = Depends(get_db)
+):
+    validate_staff_role(payload.role)
+
+    username = payload.username.strip().lower()
+    display_name = payload.display_name.strip()
+
+    if not display_name or not username.isascii() or not all(
+        c.islower() or c.isdigit() or c in "._-"
+        for c in username
+    ):
+        raise HTTPException(422, "Invalid username or display name")
+
+    if db.scalar(select(StaffUser.id).where(
+        StaffUser.username == username
+    )) is not None:
+        raise HTTPException(409, "Username already exists")
+
+    user = StaffUser(
+        username=username,
+        display_name=display_name,
+        role=payload.role,
+        password_hash=hash_new_password(payload.password),
+        active=True,
+        session_version=secrets.token_hex(24),
+    )
+
+    db.add(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not create user")
+
+    return staff_details(user)
+
+
+@app.put("/api/users/{user_id}",
+         dependencies=[Depends(require_admin)])
+def update_staff_user(
+    user_id: int,
+    payload: StaffUpdateInput,
+    db: Session = Depends(get_db)
+):
+    validate_staff_role(payload.role)
+
+    user = db.get(StaffUser, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+
+    if not payload.display_name.strip():
+        raise HTTPException(422, "Display name required")
+
+    user.display_name = payload.display_name.strip()
+    user.role = payload.role
+    user.active = payload.active
+    user.session_version = secrets.token_hex(24)
+
+    db.commit()
+    return staff_details(user)
+
+
+@app.post("/api/users/{user_id}/reset-password",
+          dependencies=[Depends(require_admin)])
+def reset_staff_password(
+    user_id: int,
+    payload: StaffPasswordInput,
+    db: Session = Depends(get_db)
+):
+    user = db.get(StaffUser, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+
+    user.password_hash = hash_new_password(payload.password)
+    user.session_version = secrets.token_hex(24)
+    db.commit()
+
+    return {"message": "Password updated; prior sessions invalidated"}
+
+
+
+def require_staff_access(
+    request: Request,
+    allowed_roles: set[str],
+):
+    if request.session.get("admin") is True:
+        require_admin(request)
+        return {"role": "owner"}
+
+    staff_id = request.session.get("staff_id")
+    if not staff_id:
+        raise HTTPException(401, "Login required")
+
+    with SessionLocal() as db:
+        staff = db.get(StaffUser, staff_id)
+
+        if (
+            staff is None
+            or not staff.active
+            or request.session.get("staff_version")
+                != staff.session_version
+        ):
+            raise HTTPException(401, "Staff session expired")
+
+        if staff.role not in allowed_roles:
+            raise HTTPException(403, "Insufficient permissions")
+
+        return staff_details(staff)
+
+
+@app.get("/api/staff/me")
+def staff_profile(request: Request):
+    return require_staff_access(
+        request, STAFF_ROLES
+    )
+
+
+@app.get("/api/staff/inventory")
+def staff_inventory(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_staff_access(
+        request,
+        {"manager", "pharmacist", "cashier", "inventory"},
+    )
+
+    medicines = db.scalars(
+        select(Medicine).order_by(
+            Medicine.name, Medicine.expiry_date
+        )
+    ).all()
+
+    return [
+        {
+            "id": m.id,
+            "name": m.name,
+            "batch_number": m.batch_number,
+            "quantity": m.quantity,
+            "expiry_date": m.expiry_date.isoformat(),
+            "unit_price": str(m.unit_price),
+        }
+        for m in medicines
+    ]
+
+
+# ===== End Staff Accounts =====
 
 
 # ===== Admin Password and Audit =====
