@@ -318,6 +318,7 @@ table th { position: sticky; top: 0; z-index: 1; }
 </nav>
 <div class="navlabel">REPORTS</div><nav class="nav">
 <button data-view="sales-report"><span class="ico">▥</span>Sales report</button>
+<button data-view="gst-report"><span class="ico">₹</span>GST & refunds report</button>
 <button data-view="valuation"><span class="ico">₹</span>Inventory valuation</button>
 <button data-view="movement-report"><span class="ico">↔</span>Stock movement report</button>
 <button data-view="expiry-report"><span class="ico">◷</span>Expiry / wastage report</button>
@@ -1470,7 +1471,7 @@ async function openSalesScreen(mode='billing'){
   content.innerHTML=`
    <div id="receiptArea">
     <h3>PharmaCare — Sales Receipt</h3>
-    <p><strong>Receipt:</strong> #${s.id}</p>
+    <p><strong>Invoice:</strong> ${esc(s.invoice_number || "#"+s.id)}</p>
     <p><strong>Date:</strong> ${esc(s.created_at?
      new Date(s.created_at).toLocaleString('en-IN'):'—')}</p>
     <div class="tablewrap"><table>
@@ -1590,6 +1591,14 @@ content.querySelector('#salesBack').onclick=history;
   );
   content.innerHTML=`<form id="salesForm">
    <div id="saleItems"></div>
+   <div class="field" style="margin:12px 0">
+     <label for="saleCustomer">Customer (optional)</label>
+     <select id="saleCustomer"><option value="">Walk-in customer</option></select>
+   </div>
+   <label style="display:block;margin:12px 0">
+    <input type="checkbox" id="saleAutoFefo" checked>
+    Automatically allocate earliest-expiring batches (FEFO)
+   </label>
   <label style="display:block;margin:12px 0">
     <input type="checkbox" id="saleInterstate"> Interstate sale (IGST)
   </label>
@@ -1604,6 +1613,16 @@ content.querySelector('#salesBack').onclick=history;
 
   const items=content.querySelector('#saleItems');
   const total=content.querySelector('#saleTotal');
+  request('/api/customers').then(customers=>{
+   const field=content.querySelector('#saleCustomer');
+   if(!field)return;
+   customers.forEach(c=>{
+    const option=document.createElement('option');
+    option.value=c.id;
+    option.textContent=c.name+(c.phone?' — '+c.phone:'');
+    field.appendChild(option);
+   });
+  }).catch(()=>{});
 
   function calculate(){
    let sum=0;
@@ -1641,9 +1660,13 @@ content.querySelector('#salesBack').onclick=history;
       <input type="number" class="saleGst" min="0" max="100"
         step="0.01" value="0" required>
     </div>
-    <div class="field"><label>Discount ₹</label>
+    <div class="field"><label>Discount ₹ (line total)</label>
       <input type="number" class="saleDiscount" min="0"
         step="0.01" value="0" required>
+    </div>
+    <div class="field"><label>HSN code (verify before invoicing)</label>
+      <input type="text" class="saleHsn" maxlength="20"
+        placeholder="Enter verified HSN">
     </div>
     <div class="field"><label>Remove</label>
      <button type="button" class="btn secondary saleRemove">Remove</button>
@@ -1668,7 +1691,8 @@ content.querySelector('#salesBack').onclick=history;
     medicine_id:Number(row.querySelector('.saleMedicine').value),
     quantity:Number(row.querySelector('.saleQty').value),
     gst_rate:row.querySelector('.saleGst').value,
-    discount_amount:row.querySelector('.saleDiscount').value
+    discount_amount:row.querySelector('.saleDiscount').value,
+    hsn_code:row.querySelector('.saleHsn').value.trim()||null
    }));
    if(!rows.length || rows.some(x=>!x.medicine_id||
       !Number.isSafeInteger(x.quantity)||x.quantity<1||
@@ -1678,11 +1702,11 @@ content.querySelector('#salesBack').onclick=history;
     error.classList.remove('hidden');
     return;
    }
-   if(rows.some(x=>{
+   if(!content.querySelector('#saleAutoFefo').checked && rows.some(x=>{
     const m=available.find(a=>a.id===x.medicine_id);
     return !m||x.quantity>m.quantity;
    })){
-    error.textContent='Insufficient stock for one or more medicines.';
+    error.textContent='Insufficient stock for one or more batches.';
     error.classList.remove('hidden');
     return;
    }
@@ -1690,11 +1714,21 @@ content.querySelector('#salesBack').onclick=history;
    const button=content.querySelector('#saleSubmit');
    button.disabled=true;
    try{
+    let saleItems=rows;
+    if(content.querySelector('#saleAutoFefo').checked){
+     const plan=await request('/api/sales/fefo-plan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({items:rows})
+     });
+     saleItems=plan.items;
+    }
     const sale=await request('/api/sales',{
      method:'POST',
      headers:{'Content-Type':'application/json'},
      body:JSON.stringify({
-      items:rows,
+      items:saleItems,
+      customer_id:Number(content.querySelector('#saleCustomer').value)||null,
       interstate:content.querySelector('#saleInterstate').checked
     })
     });
