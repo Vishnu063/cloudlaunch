@@ -23,6 +23,92 @@ body.authenticated #loginScreen{display:none}
 .login-error{color:var(--red);font-size:12px;margin-bottom:12px}
 #logoutBtn{padding:8px 11px;font-size:12px}
 
+
+/* PHARMACARE COMPACT NAVIGATION */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 12px;
+}
+.sidebar .navlabel {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  padding: 13px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: #f5f8fa;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  color: #526579;
+}
+.sidebar .navlabel::after {
+  content: "⌄";
+  font-size: 17px;
+  transition: transform .2s;
+}
+.sidebar .navlabel[aria-expanded="true"]::after {
+  transform: rotate(180deg);
+}
+.sidebar .nav {
+  display: grid;
+  gap: 3px;
+  padding: 4px 0 6px 8px;
+}
+.sidebar .nav[hidden] {
+  display: none !important;
+}
+.sidebar .nav button {
+  padding: 10px 12px;
+}
+.pharma-menu-button {
+  display: none;
+  margin-left: auto;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  padding: 8px 11px;
+  background: white;
+  cursor: pointer;
+  font-weight: 700;
+}
+@media(max-width:650px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 12px 15px;
+  }
+  .pharma-menu-button {
+    display: inline-flex;
+  }
+  .sidebar:not(.mobile-open) > .navlabel,
+  .sidebar:not(.mobile-open) > nav.nav {
+    display: none !important;
+  }
+  .sidebar .navlabel {
+    display: flex;
+  }
+  .sidebar .nav {
+    display: grid;
+    overflow: visible;
+  }
+  .brand {
+    width: 100%;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -2937,6 +3023,87 @@ $('loginForm').addEventListener('submit',async e=>{
 startSession();
 
 </script>
+
+<script>
+/* PHARMACARE COMPACT NAVIGATION */
+(function () {
+  function setupCompactNavigation() {
+    const sidebar = document.querySelector(".sidebar");
+    if (!sidebar) return;
+
+    const brand = sidebar.querySelector(".brand");
+    if (brand) {
+      const menu = document.createElement("button");
+      menu.type = "button";
+      menu.className = "pharma-menu-button";
+      menu.textContent = "☰ Menu";
+      menu.setAttribute("aria-expanded", "false");
+      brand.appendChild(menu);
+
+      menu.addEventListener("click", function () {
+        const open = sidebar.classList.toggle("mobile-open");
+        menu.setAttribute("aria-expanded", String(open));
+        menu.textContent = open ? "✕ Close" : "☰ Menu";
+      });
+
+      sidebar.querySelectorAll("[data-view]").forEach(function (item) {
+        item.addEventListener("click", function () {
+          sidebar.classList.remove("mobile-open");
+          menu.setAttribute("aria-expanded", "false");
+          menu.textContent = "☰ Menu";
+        });
+      });
+    }
+
+    const groups = [...sidebar.querySelectorAll(":scope > .navlabel")];
+
+    groups.forEach(function (label, index) {
+      const nav = label.nextElementSibling;
+      if (!nav || !nav.matches("nav.nav")) return;
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "navlabel";
+      toggle.textContent = label.textContent.trim();
+
+      const id = "pharma-nav-" + index;
+      nav.id = id;
+      toggle.setAttribute("aria-controls", id);
+
+      const initiallyOpen = !!nav.querySelector(".active");
+      nav.hidden = !initiallyOpen;
+      toggle.setAttribute("aria-expanded", String(initiallyOpen));
+
+      toggle.addEventListener("click", function () {
+        const shouldOpen = nav.hidden;
+
+        groups.forEach(function (otherLabel) {
+          const otherToggle = otherLabel._pharmaToggle;
+          const otherNav = otherLabel._pharmaNav;
+          if (otherToggle && otherNav) {
+            otherNav.hidden = true;
+            otherToggle.setAttribute("aria-expanded", "false");
+          }
+        });
+
+        nav.hidden = !shouldOpen;
+        toggle.setAttribute("aria-expanded", String(shouldOpen));
+      });
+
+      label._pharmaToggle = toggle;
+      label._pharmaNav = nav;
+      label.replaceWith(toggle);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setupCompactNavigation);
+  } else {
+    setupCompactNavigation();
+  }
+})();
+</script>
+
 </body>
 </html>\n
 
