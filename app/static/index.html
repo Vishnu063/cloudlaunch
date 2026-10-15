@@ -2884,7 +2884,7 @@ $('medicineRows').addEventListener('click',async e=>{
 
 async function startSession(){
  try{
-  const r=await fetch('/api/auth');
+  const r=await fetch('/pharmacy/api/auth');
   if(!r.ok)throw Error('Unable to check login status');
   const data=await r.json();
   if(data.authenticated)showDashboard();
