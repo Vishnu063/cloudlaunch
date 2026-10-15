@@ -284,9 +284,73 @@
         };
         const data = await api(paths[name]);
         content.replaceChildren(element("h2", name[0].toUpperCase() + name.slice(1)));
-        const pre = element("pre", JSON.stringify(data, null, 2));
-        pre.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px";
-        content.appendChild(pre);
+        const rows = Array.isArray(data) ? data : null;
+        if (name === "customers") {
+          content.appendChild(table(
+            ["Name", "Phone", "Email"],
+            rows.map(c => [c.name, c.phone || "—", c.email || "—"])
+          ));
+          const form = element("form", undefined, "formgrid");
+          form.append(
+            field("name", "Customer name"),
+            field("phone", "Phone"),
+            field("email", "Email")
+          );
+          form.elements.namedItem("name").required = true;
+          const notice = element("p");
+          const submit = element("button", "Add customer", "btn");
+          submit.type = "submit";
+          form.append(submit, notice);
+          form.addEventListener("submit", async e => {
+            e.preventDefault();
+            submit.disabled = true;
+            try {
+              const values = Object.fromEntries(new FormData(form).entries());
+              await api("customers", {
+                method: "POST", body: JSON.stringify(values)
+              });
+              await render("customers");
+            } catch (err) { notice.textContent = err.message; }
+            finally { submit.disabled = false; }
+          });
+          content.appendChild(form);
+        } else if (name === "purchasing") {
+          content.appendChild(element("p",
+            "Review purchase orders. Receiving stock remains restricted to authorized inventory roles."
+          ));
+          content.appendChild(table(
+            ["Order", "Supplier", "Status", "Created"],
+            rows.map(o => [
+              "#" + o.id, o.supplier_name || o.supplier_id || "—",
+              o.status || "—", o.created_at || "—"
+            ])
+          ));
+        } else if (name === "prescriptions") {
+          content.appendChild(element("p",
+            "Prescription metadata access is limited to authorized pharmacist or manager roles. Do not use real patient data without HTTPS and compliance review."
+          ));
+          content.appendChild(table(
+            ["Record", "Customer", "Date", "Items"],
+            rows.map(p => [
+              "#" + p.id, p.customer_name || p.customer_id || "—",
+              p.created_at || "—", Array.isArray(p.items) ? p.items.length : "—"
+            ])
+          ));
+        } else if (name === "reports") {
+          content.appendChild(table(
+            ["Metric", "Value"],
+            [
+              ["Recorded sales", data.sales_count || 0],
+              ["Gross sales", money(data.gross_sales)],
+              ["Recorded refund obligations", money(data.recorded_refunds)],
+              ["Sales after recorded refunds", money(data.sales_after_recorded_refunds)],
+              ["Received purchase orders", money(data.received_purchase_order_value)],
+              ["Pending purchase orders", money(data.pending_purchase_order_value)]
+            ]
+          ));
+          content.appendChild(element("p", data.note ||
+            "Profit is not yet calculated from cost of goods sold."));
+        }
       } catch (err) { notify(err); }
     };
     allowed.forEach(name => nav.appendChild(button(
