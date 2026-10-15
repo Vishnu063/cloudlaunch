@@ -126,8 +126,18 @@ app.add_middleware(
     session_cookie="pharmacy_session",
     max_age=28800,
     same_site="strict",
-    https_only=False,
+    https_only=os.getenv("COOKIE_SECURE", "false").lower() == "true",
 )
+
+
+def require_roles(*roles):
+    """Owner or a staff member with one of the explicitly permitted roles."""
+    allowed = set(roles)
+
+    def authorize(request: Request):
+        return require_staff_access(request, allowed)
+
+    return authorize
 
 
 def get_db():
@@ -220,7 +230,7 @@ def logout(request: Request):
     return {"authenticated": False}
 
 
-@app.get("/api/summary", dependencies=[Depends(require_admin)])
+@app.get("/api/summary", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier", "inventory"))])
 def summary(db: Session = Depends(get_db)):
     today = date.today()
     medicines = db.scalars(select(Medicine)).all()
@@ -240,7 +250,7 @@ def summary(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/medicines", dependencies=[Depends(require_admin)])
+@app.get("/api/medicines", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier", "inventory"))])
 def list_medicines(db: Session = Depends(get_db)):
     medicines = db.scalars(select(Medicine).order_by(Medicine.name)).all()
     return [
@@ -254,7 +264,7 @@ def list_medicines(db: Session = Depends(get_db)):
     ]
 
 
-@app.post("/api/medicines", status_code=201, dependencies=[Depends(require_admin)])
+@app.post("/api/medicines", status_code=201, dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))])
 def add_medicine(payload: MedicineInput, db: Session = Depends(get_db)):
     if payload.expiry_date < date.today():
         raise HTTPException(status_code=422, detail="Cannot add an expired batch")
@@ -279,7 +289,7 @@ def add_medicine(payload: MedicineInput, db: Session = Depends(get_db)):
     return {"id": medicine.id, "message": "Medicine saved"}
 
 
-@app.put("/api/medicines/{medicine_id}", dependencies=[Depends(require_admin)])
+@app.put("/api/medicines/{medicine_id}", dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))])
 def update_medicine(
     medicine_id: int, payload: MedicineUpdateInput,
     db: Session = Depends(get_db)
@@ -353,7 +363,7 @@ class StockChangeInput(BaseModel):
 
 @app.post(
     "/api/medicines/{medicine_id}/stock",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))],
 )
 def adjust_stock(
     medicine_id: int,
@@ -402,7 +412,7 @@ def adjust_stock(
 
 @app.get(
     "/api/medicines/{medicine_id}/movements",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))],
 )
 def list_movements(medicine_id: int, db: Session = Depends(get_db)):
     if db.get(Medicine, medicine_id) is None:
@@ -464,14 +474,14 @@ def supplier_dict(s):
     }
 
 
-@app.get("/api/suppliers", dependencies=[Depends(require_admin)])
+@app.get("/api/suppliers", dependencies=[Depends(require_roles("manager", "inventory"))])
 def list_suppliers(db: Session = Depends(get_db)):
     rows = db.scalars(select(Supplier).order_by(Supplier.name)).all()
     return [supplier_dict(s) for s in rows]
 
 
 @app.post("/api/suppliers", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "inventory"))])
 def create_supplier(payload: SupplierInput, db: Session = Depends(get_db)):
     data = payload.model_dump()
     data = {k: v.strip() for k, v in data.items()}
@@ -498,7 +508,7 @@ def create_supplier(payload: SupplierInput, db: Session = Depends(get_db)):
 
 
 @app.put("/api/suppliers/{supplier_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "inventory"))])
 def update_supplier(supplier_id: int, payload: SupplierInput,
                     db: Session = Depends(get_db)):
     supplier = db.get(Supplier, supplier_id)
@@ -635,7 +645,7 @@ def purchase_details(order, db):
     }
 
 
-@app.get("/api/purchase-orders", dependencies=[Depends(require_admin)])
+@app.get("/api/purchase-orders", dependencies=[Depends(require_roles("manager", "inventory"))])
 def list_purchase_orders(db: Session = Depends(get_db)):
     orders = db.scalars(
         select(PurchaseOrder).order_by(PurchaseOrder.id.desc())
@@ -644,7 +654,7 @@ def list_purchase_orders(db: Session = Depends(get_db)):
 
 
 @app.get("/api/purchase-orders/{order_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "inventory"))])
 def get_purchase_order(order_id: int, db: Session = Depends(get_db)):
     order = db.get(PurchaseOrder, order_id)
     if order is None:
@@ -653,7 +663,7 @@ def get_purchase_order(order_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/purchase-orders", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "inventory"))])
 def create_purchase_order(
     payload: PurchaseOrderInput, db: Session = Depends(get_db)
 ):
@@ -696,7 +706,7 @@ def create_purchase_order(
 
 
 @app.post("/api/purchase-orders/{order_id}/receive",
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "inventory"))])
 def receive_purchase_order(
     order_id: int, db: Session = Depends(get_db)
 ):
@@ -766,7 +776,7 @@ def receive_purchase_order(
 
 # ===== FEFO Inventory =====
 
-@app.get("/api/inventory/fefo", dependencies=[Depends(require_admin)])
+@app.get("/api/inventory/fefo", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier", "inventory"))])
 def fefo_inventory(db: Session = Depends(get_db)):
     batches = db.scalars(
         select(Medicine)
@@ -860,6 +870,102 @@ class SaleInput(BaseModel):
     interstate: bool = False
 
 
+
+class FefoPlanInput(BaseModel):
+    items: list[SaleItemInput] = Field(min_length=1, max_length=100)
+
+
+@app.post(
+    "/api/sales/fefo-plan",
+    dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))],
+)
+def plan_fefo_sale(payload: FefoPlanInput, db: Session = Depends(get_db)):
+    """Advisory FEFO batch allocation; /api/sales rechecks under row locks."""
+    ids = [item.medicine_id for item in payload.items]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "Duplicate medicine batches")
+
+    selected = {
+        m.id: m for m in db.scalars(
+            select(Medicine).where(Medicine.id.in_(ids))
+        ).all()
+    }
+    if len(selected) != len(ids):
+        raise HTTPException(404, "Medicine batch not found")
+
+    names = [selected[i].name.lower() for i in ids]
+    if len(set(names)) != len(names):
+        raise HTTPException(
+            422, "Select each medicine once for automatic FEFO allocation"
+        )
+
+    candidates = db.scalars(
+        select(Medicine)
+        .where(
+            func.lower(Medicine.name).in_(names),
+            Medicine.quantity > 0,
+            Medicine.expiry_date > date.today(),
+        )
+        .order_by(Medicine.expiry_date, Medicine.id)
+    ).all()
+
+    plan = []
+    for requested in payload.items:
+        original = selected[requested.medicine_id]
+        batches = [
+            m for m in candidates
+            if m.name.lower() == original.name.lower()
+        ]
+        if sum(m.quantity for m in batches) < requested.quantity:
+            raise HTTPException(
+                409, f"Insufficient unexpired stock: {original.name}"
+            )
+
+        remaining = requested.quantity
+        portions = []
+        for batch in batches:
+            take = min(remaining, batch.quantity)
+            if take:
+                portions.append((batch, take))
+                remaining -= take
+            if remaining == 0:
+                break
+
+        subtotal = money(sum(
+            (b.unit_price * q for b, q in portions), Decimal("0")
+        ))
+        if requested.discount_amount > subtotal:
+            raise HTTPException(422, "Discount exceeds FEFO line subtotal")
+
+        remaining_discount = requested.discount_amount
+        for index, (batch, qty) in enumerate(portions):
+            line_subtotal = money(batch.unit_price * qty)
+            if index == len(portions) - 1:
+                discount = remaining_discount
+            else:
+                discount = min(
+                    remaining_discount, line_subtotal,
+                    money(requested.discount_amount * line_subtotal / subtotal)
+                    if subtotal else Decimal("0"),
+                )
+            if discount > line_subtotal:
+                raise HTTPException(422, "Invalid FEFO discount allocation")
+            remaining_discount -= discount
+            plan.append({
+                "medicine_id": batch.id,
+                "quantity": qty,
+                "gst_rate": str(requested.gst_rate),
+                "discount_amount": str(discount),
+                "hsn_code": requested.hsn_code,
+            })
+
+    return {
+        "allocation_mode": "FEFO",
+        "items": plan,
+        "note": "Availability can change. The final sale rechecks every batch.",
+    }
+
+
 def sale_details(sale, db):
     items = db.scalars(
         select(PharmacySaleItem)
@@ -901,7 +1007,7 @@ def sale_details(sale, db):
     }
 
 
-@app.get("/api/sales", dependencies=[Depends(require_admin)])
+@app.get("/api/sales", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def list_sales(db: Session = Depends(get_db)):
     sales = db.scalars(
         select(PharmacySale).order_by(PharmacySale.id.desc()).limit(200)
@@ -909,7 +1015,7 @@ def list_sales(db: Session = Depends(get_db)):
     return [sale_details(s, db) for s in sales]
 
 
-@app.get("/api/sales/{sale_id}", dependencies=[Depends(require_admin)])
+@app.get("/api/sales/{sale_id}", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def get_sale(sale_id: int, db: Session = Depends(get_db)):
     sale = db.get(PharmacySale, sale_id)
     if sale is None:
@@ -918,7 +1024,7 @@ def get_sale(sale_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/sales", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
     ids = [item.medicine_id for item in payload.items]
     if len(ids) != len(set(ids)):
@@ -928,48 +1034,39 @@ def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
         if db.get(Customer, payload.customer_id) is None:
             raise HTTPException(404, "Customer not found")
 
-    medicines_by_id = {}
-    for medicine_id in sorted(ids):
-        medicine = db.scalars(
-            select(Medicine)
-            .where(Medicine.id == medicine_id)
-            .with_for_update()
-        ).first()
-        if medicine is None:
-            raise HTTPException(404, f"Medicine {medicine_id} not found")
-        medicines_by_id[medicine_id] = medicine
+    # Lock every potentially relevant batch in one deterministic order.
+    # Locking selected batches before earlier batches can deadlock when
+    # concurrent sales select different batches of the same medicine.
+    selected_names = db.scalars(
+        select(func.lower(Medicine.name)).where(Medicine.id.in_(ids))
+    ).all()
+    if len(selected_names) != len(ids):
+        raise HTTPException(404, "Medicine batch not found")
 
-    # Enforce FEFO, including same-expiry batch ordering.
+    locked_batches = db.scalars(
+        select(Medicine)
+        .where(func.lower(Medicine.name).in_(set(selected_names)))
+        .order_by(Medicine.id)
+        .with_for_update()
+    ).all()
+    medicines_by_id = {m.id: m for m in locked_batches if m.id in ids}
+    if len(medicines_by_id) != len(ids):
+        raise HTTPException(404, "Medicine batch not found")
+
     requested_quantities = {
         item.medicine_id: item.quantity for item in payload.items
     }
-
     for medicine in medicines_by_id.values():
-        earlier_batches = db.scalars(
-            select(Medicine)
-            .where(
-                func.lower(Medicine.name) == medicine.name.lower(),
-                Medicine.id != medicine.id,
-                Medicine.expiry_date > date.today(),
-                Medicine.quantity > 0,
-                (
-                    (Medicine.expiry_date < medicine.expiry_date)
-                    | (
-                        (Medicine.expiry_date == medicine.expiry_date)
-                        & (Medicine.id < medicine.id)
-                    )
-                ),
-            )
-            .order_by(Medicine.expiry_date, Medicine.id)
-            .with_for_update()
-        ).all()
-
-        for earlier in earlier_batches:
-            remaining = (
-                earlier.quantity
-                - requested_quantities.get(earlier.id, 0)
-            )
-            if remaining > 0:
+        for earlier in locked_batches:
+            if (
+                earlier.id != medicine.id
+                and earlier.name.lower() == medicine.name.lower()
+                and earlier.expiry_date > date.today()
+                and earlier.quantity > 0
+                and (earlier.expiry_date, earlier.id)
+                < (medicine.expiry_date, medicine.id)
+                and earlier.quantity - requested_quantities.get(earlier.id, 0) > 0
+            ):
                 raise HTTPException(
                     409,
                     f"FEFO: Use batch {earlier.batch_number} "
@@ -1161,7 +1258,7 @@ def return_details(record, db):
     }
 
 
-@app.get("/api/returns", dependencies=[Depends(require_admin)])
+@app.get("/api/returns", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def list_returns(db: Session = Depends(get_db)):
     records = db.scalars(
         select(SaleReturn).order_by(SaleReturn.id.desc()).limit(200)
@@ -1170,7 +1267,7 @@ def list_returns(db: Session = Depends(get_db)):
 
 
 @app.get("/api/returns/{return_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def get_return(return_id: int, db: Session = Depends(get_db)):
     record = db.get(SaleReturn, return_id)
     if record is None:
@@ -1179,7 +1276,7 @@ def get_return(return_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/returns", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def create_return(payload: ReturnInput, db: Session = Depends(get_db)):
     reason = payload.reason.strip()
     if len(reason) < 3:
@@ -1313,7 +1410,7 @@ def customer_dict(c):
     }
 
 
-@app.get("/api/customers", dependencies=[Depends(require_admin)])
+@app.get("/api/customers", dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def list_customers(q: str = "", db: Session = Depends(get_db)):
     if len(q) > 160:
         raise HTTPException(422, "Search is too long")
@@ -1340,7 +1437,7 @@ def list_customers(q: str = "", db: Session = Depends(get_db)):
 
 
 @app.get("/api/customers/{customer_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def get_customer(customer_id: int, db: Session = Depends(get_db)):
     customer = db.get(Customer, customer_id)
     if customer is None:
@@ -1349,7 +1446,7 @@ def get_customer(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/customers", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def add_customer(payload: CustomerInput, db: Session = Depends(get_db)):
     data = {k: v.strip() for k, v in payload.model_dump().items()}
     if not data["name"]:
@@ -1368,7 +1465,7 @@ def add_customer(payload: CustomerInput, db: Session = Depends(get_db)):
 
 
 @app.put("/api/customers/{customer_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))])
 def update_customer(
     customer_id: int,
     payload: CustomerInput,
@@ -1509,7 +1606,7 @@ def prescription_details(record, db):
 
 
 @app.get("/api/prescriptions",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist"))])
 def list_prescriptions(db: Session = Depends(get_db)):
     rows = db.scalars(
         select(Prescription)
@@ -1520,7 +1617,7 @@ def list_prescriptions(db: Session = Depends(get_db)):
 
 
 @app.get("/api/prescriptions/{prescription_id}",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist"))])
 def get_prescription(
     prescription_id: int,
     db: Session = Depends(get_db)
@@ -1532,7 +1629,7 @@ def get_prescription(
 
 
 @app.post("/api/prescriptions", status_code=201,
-          dependencies=[Depends(require_admin)])
+          dependencies=[Depends(require_roles("manager", "pharmacist"))])
 def create_prescription(
     payload: PrescriptionInput,
     db: Session = Depends(get_db)
@@ -1661,7 +1758,7 @@ def profile_data(profile):
 
 
 @app.get("/api/pharmacy-profile",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager", "pharmacist", "cashier", "inventory"))])
 def get_pharmacy_profile(db: Session = Depends(get_db)):
     return profile_data(db.get(PharmacyProfile, 1))
 
@@ -1732,7 +1829,7 @@ def save_owner_profile(
 
 # ===== Inventory Reports =====
 
-@app.get("/api/reports/stock", dependencies=[Depends(require_admin)])
+@app.get("/api/reports/stock", dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))])
 def stock_report(db: Session = Depends(get_db)):
     medicines = db.scalars(
         select(Medicine).order_by(Medicine.name, Medicine.expiry_date)
@@ -1768,7 +1865,7 @@ def stock_report(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/reports/expiry", dependencies=[Depends(require_admin)])
+@app.get("/api/reports/expiry", dependencies=[Depends(require_roles("manager", "pharmacist", "inventory"))])
 def expiry_report(
     days: int = 90,
     db: Session = Depends(get_db),
@@ -1818,7 +1915,7 @@ def expiry_report(
 
 # ===== GST Sales Report =====
 
-@app.get("/api/reports/gst", dependencies=[Depends(require_admin)])
+@app.get("/api/reports/gst", dependencies=[Depends(require_roles("manager"))])
 def gst_sales_report(
     start_date: date | None = None,
     end_date: date | None = None,
@@ -1884,8 +1981,175 @@ def gst_sales_report(
 # ===== End GST Sales Report =====
 
 
+# ===== Return tax breakdown and draft credit notes =====
+
+def return_tax_details(record, db: Session):
+    """Calculate each partial return from original invoice taxes."""
+    entries = db.scalars(
+        select(SaleReturnItem)
+        .where(SaleReturnItem.return_id == record.id)
+        .order_by(SaleReturnItem.id)
+    ).all()
+    totals = {
+        key: Decimal("0.00")
+        for key in ("taxable", "cgst", "sgst", "igst", "refund")
+    }
+    detail_rows = []
+
+    for row in entries:
+        sold = db.get(PharmacySaleItem, row.sale_item_id)
+        previous = int(db.scalar(
+            select(func.coalesce(func.sum(SaleReturnItem.quantity), 0))
+            .where(
+                SaleReturnItem.sale_item_id == row.sale_item_id,
+                SaleReturnItem.return_id < record.id,
+            )
+        ) or 0)
+        after = previous + row.quantity
+
+        def share(amount):
+            value = amount or Decimal("0")
+            return (
+                money(value * after / sold.quantity)
+                - money(value * previous / sold.quantity)
+            )
+
+        cgst = share(sold.cgst_amount)
+        sgst = share(sold.sgst_amount)
+        igst = share(sold.igst_amount)
+        original_total = sum(
+            (sold.taxable_amount or Decimal("0"),)
+            + tuple(
+                getattr(sold, k) or Decimal("0")
+                for k in ("cgst_amount", "sgst_amount", "igst_amount")
+            ),
+            Decimal("0"),
+        )
+        refund = share(original_total)
+        taxable = refund - cgst - sgst - igst
+
+        for key, value in (
+            ("taxable", taxable), ("cgst", cgst),
+            ("sgst", sgst), ("igst", igst), ("refund", refund)
+        ):
+            totals[key] += value
+
+        detail_rows.append({
+            "medicine": row.medicine_name,
+            "batch_number": row.batch_number,
+            "quantity": row.quantity,
+            "taxable": str(taxable),
+            "cgst": str(cgst), "sgst": str(sgst),
+            "igst": str(igst), "refund": str(refund),
+        })
+
+    return {
+        "totals": {k: str(money(v)) for k, v in totals.items()},
+        "items": detail_rows,
+        "matches_recorded_refund": (
+            money(totals["refund"]) == money(record.refund_amount)
+        ),
+    }
+
+
+@app.get(
+    "/api/returns/{return_id}/credit-note",
+    dependencies=[Depends(require_roles("manager", "pharmacist", "cashier"))],
+)
+def draft_credit_note(return_id: int, db: Session = Depends(get_db)):
+    record = db.get(SaleReturn, return_id)
+    if record is None:
+        raise HTTPException(404, "Return not found")
+    sale = db.get(PharmacySale, record.sale_id)
+    breakdown = return_tax_details(record, db)
+    if not breakdown["matches_recorded_refund"]:
+        raise HTTPException(
+            409, "Return amount needs review before credit note can be issued"
+        )
+    return {
+        "document_type": "draft_credit_note",
+        "draft_number": f"PC-CN-{record.created_at.year}-{record.id:06d}",
+        "original_invoice": sale.invoice_number,
+        "return_id": record.id,
+        "date": record.created_at.isoformat(),
+        "reason": record.reason,
+        "refund_status": "recorded_not_paid",
+        "tax_breakdown": breakdown,
+        "notice": (
+            "Draft calculation only. Validate GST treatment, buyer details "
+            "and legal credit-note requirements before issuing."
+        ),
+    }
+
+
+@app.get(
+    "/api/reports/gst-net",
+    dependencies=[Depends(require_roles("manager"))],
+)
+def gst_net_report(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(422, "Invalid date range")
+
+    gross = gst_sales_report(start_date, end_date, db)
+    query = select(SaleReturn)
+    if start_date:
+        query = query.where(func.date(SaleReturn.created_at) >= start_date)
+    if end_date:
+        query = query.where(func.date(SaleReturn.created_at) <= end_date)
+    records = db.scalars(query.order_by(SaleReturn.id)).all()
+
+    refunded = {
+        key: Decimal("0.00")
+        for key in ("taxable", "cgst", "sgst", "igst", "refund")
+    }
+    credit_notes = []
+
+    for record in records:
+        breakdown = return_tax_details(record, db)
+        for field in refunded:
+            refunded[field] += Decimal(breakdown["totals"][field])
+        credit_notes.append({
+            "return_id": record.id,
+            "draft_number": f"PC-CN-{record.created_at.year}-{record.id:06d}",
+            "refund": breakdown["totals"]["refund"],
+            "reconciled": breakdown["matches_recorded_refund"],
+        })
+
+    totals = gross["totals"]
+    net = {
+        "taxable": money(Decimal(totals["taxable_total"]) - refunded["taxable"]),
+        "cgst": money(Decimal(totals["cgst_total"]) - refunded["cgst"]),
+        "sgst": money(Decimal(totals["sgst_total"]) - refunded["sgst"]),
+        "igst": money(Decimal(totals["igst_total"]) - refunded["igst"]),
+        "collected_less_recorded_refunds": money(
+            Decimal(totals["total"]) - refunded["refund"]
+        ),
+    }
+    return {
+        "report_type": "net_gst_after_recorded_returns",
+        "start_date": gross["start_date"],
+        "end_date": gross["end_date"],
+        "gross": totals,
+        "returns": {k: str(money(v)) for k, v in refunded.items()},
+        "net": {k: str(v) for k, v in net.items()},
+        "draft_credit_notes": credit_notes,
+        "warning": (
+            "Returns are refund obligations, not verified payments. "
+            "This is not a statutory GST filing or automatically issued "
+            "credit-note register."
+        ),
+    }
+
+
+
+
+
 @app.get("/api/finance/summary",
-         dependencies=[Depends(require_admin)])
+         dependencies=[Depends(require_roles("manager"))])
 def finance_summary(db: Session = Depends(get_db)):
     gross = db.scalar(
         select(func.coalesce(func.sum(PharmacySale.total), 0))
@@ -2314,6 +2578,12 @@ async def record_admin_mutations(request: Request, call_next):
             # into a misleading client-side failure.
             pass
 
+    # No browser or intermediary should cache authenticated API responses.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if path.startswith("/api/") or path == "/":
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
