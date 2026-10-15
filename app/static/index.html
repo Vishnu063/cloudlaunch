@@ -1475,13 +1475,15 @@ async function openSalesScreen(mode='billing'){
     <p><strong>Date:</strong> ${esc(s.created_at?
      new Date(s.created_at).toLocaleString('en-IN'):'—')}</p>
     <div class="tablewrap"><table>
-     <thead><tr><th>Medicine</th><th>Batch</th>
-      <th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+     <thead><tr><th>Medicine / HSN</th><th>Batch</th>
+      <th>Qty</th><th>Price</th><th>Discount</th><th>GST %</th><th>Amount</th></tr></thead>
      <tbody>${s.items.map(i=>`<tr>
-      <td>${esc(i.medicine)}</td>
+      <td>${esc(i.medicine)}<small style="display:block">HSN: ${esc(i.hsn_code||'Not supplied')}</small></td>
       <td>${esc(i.batch_number)}</td>
       <td>${i.quantity}</td>
       <td>${money(i.unit_price)}</td>
+      <td>${money(i.discount_amount)}</td>
+      <td>${esc(i.gst_rate)}%</td>
       <td>${money(i.line_total)}</td>
      </tr>`).join('')}</tbody>
     </table></div>
