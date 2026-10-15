@@ -1836,8 +1836,27 @@ async function openReturnsScreen(){
     </tr>`).join('')}</tbody></table></div>
    <div class="formactions">
     <button class="btn secondary" type="button" id="returnBack">Back</button>
+    <button class="btn secondary" type="button" id="returnDraftCredit">Draft credit note</button>
    </div>`;
   content.querySelector('#returnBack').onclick=showList;
+  content.querySelector('#returnDraftCredit').onclick=async()=>{
+   const button=content.querySelector('#returnDraftCredit');
+   button.disabled=true;
+   try{
+    const note=await request('/api/returns/'+id+'/credit-note');
+    const breakdown=note.tax_breakdown.totals;
+    const container=document.createElement('section');
+    container.className='notice';
+    container.style.marginTop='15px';
+    container.textContent='Draft '+note.draft_number+' / Invoice '+
+      (note.original_invoice||'—')+' — Taxable '+money(breakdown.taxable)+
+      ', CGST '+money(breakdown.cgst)+', SGST '+money(breakdown.sgst)+
+      ', IGST '+money(breakdown.igst)+', Refund '+money(breakdown.refund)+
+      '. '+note.notice;
+    button.parentNode.appendChild(container);
+   }catch(error){alert(error.message)}
+   finally{button.disabled=false}
+  };
  }
 
  function showForm(){
