@@ -30,10 +30,13 @@ body.authenticated #loginScreen{display:none}
 <div id="loginScreen">
   <section class="login-card">
     <div class="login-brand"><div class="logo">✚</div><div>PharmaCare<small style="display:block;color:var(--muted);font-size:10px;letter-spacing:1.4px">PHARMACY OS</small></div></div>
-    <h1>Admin sign in</h1>
+    <h1>PharmaCare Sign In</h1>
     <p>Sign in to securely manage your pharmacy inventory.</p>
     <form id="loginForm">
-      <label for="loginPassword">Admin password</label>
+      <label for="loginUsername">Username (leave blank for owner)</label>
+      <input id="loginUsername" type="text" maxlength="80"
+        autocomplete="username" placeholder="Staff username or blank">
+      <label for="loginPassword">Password</label>
       <input id="loginPassword" type="password" autocomplete="current-password" required maxlength="256" placeholder="Enter admin password">
       <div id="loginError" class="login-error" role="alert"></div>
       <button class="btn" id="loginBtn" type="submit" style="width:100%">Sign in</button>
@@ -2909,13 +2912,22 @@ $('loginForm').addEventListener('submit',async e=>{
  const btn=$('loginBtn');
  btn.disabled=true;btn.textContent='Signing in…';$('loginError').textContent='';
  try{
-  await request('/api/login',{
+  const loginResult=await request('/api/login',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({password:$('loginPassword').value})
+   body:JSON.stringify({
+      username:$('loginUsername').value.trim(),
+      password:$('loginPassword').value
+    })
   });
   $('loginPassword').value='';
-  showDashboard();
+  if(loginResult.role==='owner'){
+    showDashboard();
+  }else{
+    document.dispatchEvent(new CustomEvent(
+      'pharmacare-staff-login',{detail:loginResult}
+    ));
+  }
  }catch(err){
   $('loginError').textContent=err.message==='Invalid password'?'Incorrect password. Please try again.':'Login failed. Please try again.';
  }finally{
@@ -2926,4 +2938,407 @@ startSession();
 
 </script>
 </body>
-</html>
+</html>\n
+
+<script>
+(() => {
+  const escapeText = value => String(value ?? "").replace(
+    /[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",
+      '"':"&quot;","'":"&#39;"
+    }[c])
+  );
+
+  async function openStaffWorkspace(user) {
+    if(document.getElementById("pcStaffWorkspace")) return;
+
+    const panel=document.createElement("main");
+    panel.id="pcStaffWorkspace";
+    panel.style.cssText=
+      "position:fixed;inset:0;z-index:99998;background:#f5f7fa;" +
+      "color:#182536;overflow:auto;padding:24px";
+
+    panel.innerHTML=`
+      <div style="max-width:1100px;margin:auto">
+        <header style="display:flex;justify-content:space-between;
+          align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <h1>PharmaCare Staff</h1>
+            <p>${escapeText(user.username || "")}
+              — ${escapeText(user.role || "")}</p>
+          </div>
+          <button type="button" id="pcStaffLogout"
+            class="btn secondary">Sign out</button>
+        </header>
+        <h2 style="margin-top:28px">Medicine Inventory</h2>
+        <p>Read-only inventory access. Other operations require
+          role-specific authorization.</p>
+        <div id="pcStaffInventory">Loading inventory...</div>
+      </div>`;
+
+    document.body.appendChild(panel);
+
+    panel.querySelector("#pcStaffLogout").onclick=async()=>{
+      try {
+        await fetch("/pharmacy/api/logout",{
+          method:"POST",credentials:"same-origin"
+        });
+      }finally{
+        location.reload();
+      }
+    };
+
+    try{
+      const response=await fetch("/pharmacy/api/staff/inventory",{
+        credentials:"same-origin"
+      });
+      if(!response.ok) throw Error("Inventory unavailable: "+response.status);
+      const rows=await response.json();
+
+      panel.querySelector("#pcStaffInventory").innerHTML=
+        `<div class="tablewrap"><table>
+          <thead><tr><th>Medicine</th><th>Batch</th>
+          <th>Stock</th><th>Expiry</th><th>Unit price</th></tr></thead>
+          <tbody>${rows.map(m=>`<tr>
+            <td>${escapeText(m.name)}</td>
+            <td>${escapeText(m.batch_number)}</td>
+            <td>${escapeText(m.quantity)}</td>
+            <td>${escapeText(m.expiry_date)}</td>
+            <td>${escapeText(m.unit_price)}</td>
+          </tr>`).join("")}</tbody></table></div>`;
+    }catch(err){
+      panel.querySelector("#pcStaffInventory").textContent=err.message;
+    }
+  }
+
+  document.addEventListener("pharmacare-staff-login",event=>{
+    openStaffWorkspace(event.detail);
+  });
+
+  // Restore the restricted staff view after a page refresh.
+  fetch("/pharmacy/api/auth",{credentials:"same-origin"})
+    .then(r=>r.ok?r.json():null)
+    .then(auth=>{
+      if(auth?.authenticated && auth.role && auth.role!=="owner"){
+        openStaffWorkspace(auth);
+      }
+    })
+    .catch(()=>{});
+})();
+</script>
+
+<!-- PHARMACARE USERS AND ROLES -->
+<script>
+(() => {
+  const roles = {
+    manager: "Manager",
+    pharmacist: "Pharmacist",
+    cashier: "Cashier",
+    inventory: "Inventory Staff"
+  };
+
+  const escUser = v => String(v ?? "").replace(
+    /[&<>"']/g,
+    c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;",
+      '"': "&quot;", "'": "&#39;"
+    }[c])
+  );
+
+  const apiBase = new URL("api/", new URL("/pharmacy/", location.origin));
+
+  async function api(path, options = {}) {
+    const res = await fetch(new URL(path, apiBase), {
+      credentials: "same-origin",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+
+    if (!res.ok) {
+      let message = `Request failed: ${res.status}`;
+      try {
+        const body = await res.json();
+        message = typeof body.detail === "string"
+          ? body.detail : message;
+      } catch (_) {}
+      throw Error(message);
+    }
+
+    return res.status === 204 ? null : res.json();
+  }
+
+  function roleOptions(selected = "cashier") {
+    return Object.entries(roles).map(([value, label]) =>
+      `<option value="${value}" ${selected === value ? "selected" : ""}>
+        ${label}
+      </option>`
+    ).join("");
+  }
+
+  function createModal() {
+    const overlay = document.createElement("div");
+    overlay.id = "pcUsersOverlay";
+    overlay.style.cssText =
+      "position:fixed;inset:0;background:#0009;z-index:99999;" +
+      "display:flex;align-items:center;justify-content:center;padding:16px";
+
+    overlay.innerHTML = `
+      <section role="dialog" aria-modal="true"
+        aria-labelledby="pcUsersTitle"
+        style="background:#fff;color:#182536;width:min(950px,100%);
+        max-height:92vh;overflow:auto;border-radius:14px;padding:22px">
+        <div style="display:flex;justify-content:space-between;gap:12px;
+          align-items:center">
+          <h2 id="pcUsersTitle">Users & Roles</h2>
+          <button type="button" data-close-users
+            class="btn secondary">Close</button>
+        </div>
+        <p>Manage pharmacy staff access. Owner permissions remain separate.</p>
+        <div id="pcUsersMessage" role="status"></div>
+        <div id="pcUsersTable">Loading users...</div>
+        <hr style="margin:20px 0">
+        <h3 id="pcUserFormTitle">Add staff member</h3>
+        <form id="pcUserForm">
+          <div class="formgrid">
+            <div class="field">
+              <label>Username</label>
+              <input name="username" required minlength="3"
+                maxlength="80" pattern="[a-z0-9._-]+"
+                placeholder="e.g. pharmacist1"
+                autocomplete="off">
+            </div>
+            <div class="field">
+              <label>Full name</label>
+              <input name="display_name" required maxlength="160">
+            </div>
+            <div class="field">
+              <label>Role</label>
+              <select name="role">${roleOptions()}</select>
+            </div>
+            <div class="field">
+              <label>Temporary password</label>
+              <input name="password" type="password"
+                required minlength="12" maxlength="128"
+                autocomplete="new-password">
+            </div>
+          </div>
+          <div class="formactions">
+            <button type="submit" class="btn">Create staff account</button>
+          </div>
+        </form>
+      </section>`;
+
+    document.body.appendChild(overlay);
+
+    const message = overlay.querySelector("#pcUsersMessage");
+    const table = overlay.querySelector("#pcUsersTable");
+    const form = overlay.querySelector("#pcUserForm");
+
+    let users = [];
+
+    function notify(text, error = false) {
+      message.textContent = text;
+      message.style.color = error ? "#b42318" : "#087443";
+    }
+
+    async function refresh() {
+      users = await api("users");
+
+      table.innerHTML = users.length
+        ? `<div class="tablewrap"><table>
+            <thead><tr>
+              <th>Username</th><th>Name</th><th>Role</th>
+              <th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>${users.map(u => `
+              <tr>
+                <td>${escUser(u.username)}</td>
+                <td>${escUser(u.display_name)}</td>
+                <td>${escUser(roles[u.role] || u.role)}</td>
+                <td>${u.active ? "Active" : "Disabled"}</td>
+                <td>
+                  <button class="btn secondary" type="button"
+                    data-edit-user="${u.id}">Edit</button>
+                  <button class="btn secondary" type="button"
+                    data-reset-user="${u.id}">Reset password</button>
+                </td>
+              </tr>`).join("")}</tbody></table></div>`
+        : "<p>No staff accounts yet.</p>";
+    }
+
+    function showEdit(user) {
+      form.innerHTML = `
+        <div class="formgrid">
+          <div class="field"><label>Full name</label>
+            <input name="display_name" required maxlength="160"
+              value="${escUser(user.display_name)}"></div>
+          <div class="field"><label>Role</label>
+            <select name="role">${roleOptions(user.role)}</select>
+          </div>
+          <div class="field"><label>Status</label>
+            <select name="active">
+              <option value="true" ${user.active ? "selected" : ""}>Active</option>
+              <option value="false" ${!user.active ? "selected" : ""}>Disabled</option>
+            </select>
+          </div>
+        </div>
+        <div class="formactions">
+          <button class="btn" type="submit">Save changes</button>
+          <button class="btn secondary" type="button"
+            data-cancel-users>Cancel</button>
+        </div>`;
+
+      overlay.querySelector("#pcUserFormTitle").textContent =
+        `Edit ${user.username}`;
+
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const data = new FormData(form);
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+
+        try {
+          await api(`users/${user.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              display_name: data.get("display_name"),
+              role: data.get("role"),
+              active: data.get("active") === "true"
+            })
+          });
+          notify("Staff account updated.");
+          resetForm();
+          await refresh();
+        } catch (err) {
+          notify(err.message, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      };
+    }
+
+    function showReset(user) {
+      overlay.querySelector("#pcUserFormTitle").textContent =
+        `Reset password: ${user.username}`;
+
+      form.innerHTML = `
+        <div class="field">
+          <label>New password (minimum 12 characters)</label>
+          <input type="password" name="password" required
+            minlength="12" maxlength="128" autocomplete="new-password">
+        </div>
+        <div class="formactions">
+          <button class="btn" type="submit">Update password</button>
+          <button class="btn secondary" type="button"
+            data-cancel-users>Cancel</button>
+        </div>`;
+
+      form.onsubmit = async event => {
+        event.preventDefault();
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+
+        try {
+          await api(`users/${user.id}/reset-password`, {
+            method: "POST",
+            body: JSON.stringify({
+              password: new FormData(form).get("password")
+            })
+          });
+          notify("Password updated. Previous staff sessions invalidated.");
+          resetForm();
+          await refresh();
+        } catch (err) {
+          notify(err.message, true);
+          button.disabled = false;
+        }
+      };
+    }
+
+    function resetForm() {
+      overlay.querySelector("#pcUserFormTitle").textContent =
+        "Add staff member";
+
+      form.innerHTML = `
+        <div class="formgrid">
+          <div class="field"><label>Username</label>
+            <input name="username" required minlength="3" maxlength="80"
+              pattern="[a-z0-9._-]+" autocomplete="off"></div>
+          <div class="field"><label>Full name</label>
+            <input name="display_name" required maxlength="160"></div>
+          <div class="field"><label>Role</label>
+            <select name="role">${roleOptions()}</select></div>
+          <div class="field"><label>Temporary password</label>
+            <input type="password" name="password" required minlength="12"
+              maxlength="128" autocomplete="new-password"></div>
+        </div>
+        <div class="formactions">
+          <button class="btn" type="submit">Create staff account</button>
+        </div>`;
+
+      form.onsubmit = async event => {
+        event.preventDefault();
+
+        const data = new FormData(form);
+        const button = form.querySelector('[type="submit"]');
+        button.disabled = true;
+
+        try {
+          await api("users", {
+            method: "POST",
+            body: JSON.stringify(Object.fromEntries(data))
+          });
+          notify("Staff account created.");
+          resetForm();
+          await refresh();
+        } catch (err) {
+          notify(err.message, true);
+          button.disabled = false;
+        }
+      };
+    }
+
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay ||
+          event.target.closest("[data-close-users]")) {
+        overlay.remove();
+        return;
+      }
+
+      if (event.target.closest("[data-cancel-users]")) {
+        resetForm();
+        return;
+      }
+
+      const edit = event.target.closest("[data-edit-user]");
+      if (edit) {
+        const user = users.find(u => u.id === Number(edit.dataset.editUser));
+        if (user) showEdit(user);
+      }
+
+      const reset = event.target.closest("[data-reset-user]");
+      if (reset) {
+        const user = users.find(u => u.id === Number(reset.dataset.resetUser));
+        if (user) showReset(user);
+      }
+    });
+
+    resetForm();
+    refresh().catch(err => notify(err.message, true));
+  }
+
+  // Capture the Users & Roles navigation before placeholder handlers run.
+  document.addEventListener("click", event => {
+    const target = event.target.closest('[data-view="users"]');
+    if (!target) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    createModal();
+  }, true);
+})();
+</script>
+\n
