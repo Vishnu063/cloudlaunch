@@ -1342,6 +1342,10 @@ content.querySelector('#salesBack').onclick=history;
   modal.querySelector('#salesTitle').textContent='New Sale / Billing';
   const available=medicines.filter(m=>
    m.quantity>0 && daysTo(m.expiry_date)>0
+  ).sort((a,b)=>
+    a.name.localeCompare(b.name) ||
+    a.expiry_date.localeCompare(b.expiry_date) ||
+    a.id-b.id
   );
   content.innerHTML=`<form id="salesForm">
    <div id="saleItems"></div>

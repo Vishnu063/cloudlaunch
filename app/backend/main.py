@@ -714,6 +714,39 @@ def receive_purchase_order(
 # ===== End Purchase Orders =====
 
 
+# ===== FEFO Inventory =====
+
+@app.get("/api/inventory/fefo", dependencies=[Depends(require_admin)])
+def fefo_inventory(db: Session = Depends(get_db)):
+    batches = db.scalars(
+        select(Medicine)
+        .where(
+            Medicine.quantity > 0,
+            Medicine.expiry_date > date.today()
+        )
+        .order_by(
+            Medicine.name,
+            Medicine.expiry_date,
+            Medicine.id
+        )
+    ).all()
+
+    return [
+        {
+            "id": m.id,
+            "name": m.name,
+            "batch_number": m.batch_number,
+            "quantity": m.quantity,
+            "expiry_date": m.expiry_date.isoformat(),
+            "unit_price": str(m.unit_price),
+        }
+        for m in batches
+    ]
+
+
+# ===== End FEFO Inventory =====
+
+
 # ===== Sales and Billing =====
 
 class PharmacySale(Base):
@@ -855,6 +888,43 @@ def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
         if medicine is None:
             raise HTTPException(404, f"Medicine {medicine_id} not found")
         medicines_by_id[medicine_id] = medicine
+
+    # Enforce FEFO, including same-expiry batch ordering.
+    requested_quantities = {
+        item.medicine_id: item.quantity for item in payload.items
+    }
+
+    for medicine in medicines_by_id.values():
+        earlier_batches = db.scalars(
+            select(Medicine)
+            .where(
+                func.lower(Medicine.name) == medicine.name.lower(),
+                Medicine.id != medicine.id,
+                Medicine.expiry_date > date.today(),
+                Medicine.quantity > 0,
+                (
+                    (Medicine.expiry_date < medicine.expiry_date)
+                    | (
+                        (Medicine.expiry_date == medicine.expiry_date)
+                        & (Medicine.id < medicine.id)
+                    )
+                ),
+            )
+            .order_by(Medicine.expiry_date, Medicine.id)
+            .with_for_update()
+        ).all()
+
+        for earlier in earlier_batches:
+            remaining = (
+                earlier.quantity
+                - requested_quantities.get(earlier.id, 0)
+            )
+            if remaining > 0:
+                raise HTTPException(
+                    409,
+                    f"FEFO: Use batch {earlier.batch_number} "
+                    f"of {medicine.name} first"
+                )
 
     calculated = []
     totals = {
@@ -1606,6 +1676,162 @@ def save_owner_profile(
         raise HTTPException(409, "Could not save owner profile")
 
     return profile_data(profile)
+
+
+
+
+# ===== Inventory Reports =====
+
+@app.get("/api/reports/stock", dependencies=[Depends(require_admin)])
+def stock_report(db: Session = Depends(get_db)):
+    medicines = db.scalars(
+        select(Medicine).order_by(Medicine.name, Medicine.expiry_date)
+    ).all()
+
+    today = date.today()
+    rows = []
+    total_value = Decimal("0.00")
+
+    for m in medicines:
+        value = money(m.quantity * m.unit_price)
+        total_value += value
+
+        rows.append({
+            "medicine_id": m.id,
+            "name": m.name,
+            "batch_number": m.batch_number,
+            "quantity": m.quantity,
+            "reorder_level": m.reorder_level,
+            "unit_price": str(m.unit_price),
+            "stock_value": str(value),
+            "expiry_date": m.expiry_date.isoformat(),
+            "expired": m.expiry_date <= today,
+            "low_stock": m.quantity <= m.reorder_level,
+        })
+
+    return {
+        "total_batches": len(rows),
+        "total_quantity": sum(m.quantity for m in medicines),
+        "stock_value": str(money(total_value)),
+        "valuation_basis": "selling_price_not_cost",
+        "items": rows,
+    }
+
+
+@app.get("/api/reports/expiry", dependencies=[Depends(require_admin)])
+def expiry_report(
+    days: int = 90,
+    db: Session = Depends(get_db),
+):
+    if days < 0 or days > 3650:
+        raise HTTPException(422, "Days must be between 0 and 3650")
+
+    today = date.today()
+
+    medicines = db.scalars(
+        select(Medicine)
+        .where(Medicine.quantity > 0)
+        .order_by(Medicine.expiry_date, Medicine.name)
+    ).all()
+
+    expired = []
+    expiring = []
+
+    for m in medicines:
+        days_left = (m.expiry_date - today).days
+
+        row = {
+            "medicine_id": m.id,
+            "name": m.name,
+            "batch_number": m.batch_number,
+            "quantity": m.quantity,
+            "expiry_date": m.expiry_date.isoformat(),
+            "days_left": days_left,
+        }
+
+        if days_left <= 0:
+            expired.append(row)
+        elif days_left <= days:
+            expiring.append(row)
+
+    return {
+        "warning_days": days,
+        "expired_count": len(expired),
+        "expiring_count": len(expiring),
+        "expired": expired,
+        "expiring": expiring,
+    }
+
+
+# ===== End Inventory Reports =====
+
+
+# ===== GST Sales Report =====
+
+@app.get("/api/reports/gst", dependencies=[Depends(require_admin)])
+def gst_sales_report(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(422, "Invalid date range")
+
+    query = select(PharmacySale)
+
+    if start_date:
+        query = query.where(
+            func.date(PharmacySale.created_at) >= start_date
+        )
+    if end_date:
+        query = query.where(
+            func.date(PharmacySale.created_at) <= end_date
+        )
+
+    sales = db.scalars(
+        query.order_by(PharmacySale.id)
+    ).all()
+
+    fields = (
+        "subtotal", "discount_total", "taxable_total",
+        "cgst_total", "sgst_total", "igst_total", "total"
+    )
+
+    totals = {
+        field: money(sum(
+            (getattr(sale, field) or Decimal("0")
+             for sale in sales),
+            Decimal("0")
+        ))
+        for field in fields
+    }
+
+    return {
+        "report_type": "gross_sales_gst",
+        "note": "Excludes return adjustments and credit notes.",
+        "start_date": str(start_date) if start_date else None,
+        "end_date": str(end_date) if end_date else None,
+        "invoice_count": len(sales),
+        "totals": {
+            key: str(value)
+            for key, value in totals.items()
+        },
+        "invoices": [
+            {
+                "invoice_number": sale.invoice_number,
+                "date": sale.created_at.isoformat()
+                    if sale.created_at else None,
+                "total": str(sale.total),
+                "cgst": str(sale.cgst_total or 0),
+                "sgst": str(sale.sgst_total or 0),
+                "igst": str(sale.igst_total or 0),
+            }
+            for sale in sales
+        ],
+    }
+
+
+# ===== End GST Sales Report =====
 
 
 @app.get("/api/finance/summary",
