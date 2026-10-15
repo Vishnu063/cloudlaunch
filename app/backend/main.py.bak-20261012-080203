@@ -1,0 +1,1024 @@
+import os
+import hmac
+import hashlib
+from contextlib import asynccontextmanager
+from datetime import date, datetime
+from decimal import Decimal
+
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
+from pydantic import BaseModel, Field
+from sqlalchemy import (
+    create_engine, String, Integer, Date, Numeric, DateTime,
+    func, select, ForeignKey
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+SESSION_SECRET = os.getenv("SESSION_SECRET", "")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required")
+if not ADMIN_PASSWORD_HASH or not SESSION_SECRET:
+    raise RuntimeError("ADMIN_PASSWORD_HASH and SESSION_SECRET are required")
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Medicine(Base):
+    __tablename__ = "medicines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    category: Mapped[str] = mapped_column(String(100), default="General")
+    batch_number: Mapped[str] = mapped_column(String(100), unique=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    reorder_level: Mapped[int] = mapped_column(Integer, default=10)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    expiry_date: Mapped[date] = mapped_column(Date)
+    supplier: Mapped[str] = mapped_column(String(160), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    medicine_id: Mapped[int] = mapped_column(
+        ForeignKey("medicines.id", ondelete="CASCADE"), index=True
+    )
+    movement_type: Mapped[str] = mapped_column(String(30))
+    quantity_change: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MedicineInput(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    category: str = Field(default="General", max_length=100)
+    batch_number: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=0)
+    reorder_level: int = Field(default=10, ge=0)
+    unit_price: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    expiry_date: date
+    supplier: str = Field(default="", max_length=160)
+
+
+class MedicineUpdateInput(MedicineInput):
+    stock_change_reason: str | None = Field(default=None, max_length=200)
+
+
+def verify_password(password: str) -> bool:
+    try:
+        algorithm, iterations, salt_hex, expected = ADMIN_PASSWORD_HASH.split("$")
+        if algorithm != "pbkdf2_sha256":
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations)
+        ).hex()
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError):
+        return False
+
+
+def require_admin(request: Request):
+    if request.session.get("admin") is not True:
+        raise HTTPException(status_code=401, detail="Login required")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(engine)
+    yield
+    engine.dispose()
+
+
+app = FastAPI(
+    title="CloudLaunch Pharmacy API",
+    version="1.0.0",
+    lifespan=lifespan
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="pharmacy_session",
+    max_age=28800,
+    same_site="strict",
+    https_only=False,
+)
+
+
+def get_db():
+    with SessionLocal() as db:
+        yield db
+
+
+@app.get("/health")
+def health():
+    with engine.connect() as conn:
+        conn.execute(select(1))
+    return {"status": "healthy", "database": "connected"}
+
+
+@app.get("/api/auth")
+def auth_status(request: Request):
+    return {"authenticated": request.session.get("admin") is True}
+
+
+class LoginInput(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+@app.post("/api/login")
+def login(payload: LoginInput, request: Request):
+    if not verify_password(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+    request.session.clear()
+    request.session["admin"] = True
+    return {"authenticated": True}
+
+
+@app.post("/api/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"authenticated": False}
+
+
+@app.get("/api/summary", dependencies=[Depends(require_admin)])
+def summary(db: Session = Depends(get_db)):
+    today = date.today()
+    medicines = db.scalars(select(Medicine)).all()
+    return {
+        "medicine_count": len(medicines),
+        "units_in_stock": sum(m.quantity for m in medicines),
+        "low_stock_count": sum(
+            1 for m in medicines if m.quantity <= m.reorder_level
+        ),
+        "expiring_soon_count": sum(
+            1 for m in medicines
+            if today <= m.expiry_date <= date.fromordinal(today.toordinal() + 90)
+        ),
+        "inventory_value": str(sum(
+            (m.unit_price * m.quantity for m in medicines), Decimal("0.00")
+        )),
+    }
+
+
+@app.get("/api/medicines", dependencies=[Depends(require_admin)])
+def list_medicines(db: Session = Depends(get_db)):
+    medicines = db.scalars(select(Medicine).order_by(Medicine.name)).all()
+    return [
+        {
+            "id": m.id, "name": m.name, "category": m.category,
+            "batch_number": m.batch_number, "quantity": m.quantity,
+            "reorder_level": m.reorder_level, "unit_price": str(m.unit_price),
+            "expiry_date": m.expiry_date.isoformat(), "supplier": m.supplier,
+        }
+        for m in medicines
+    ]
+
+
+@app.post("/api/medicines", status_code=201, dependencies=[Depends(require_admin)])
+def add_medicine(payload: MedicineInput, db: Session = Depends(get_db)):
+    if payload.expiry_date < date.today():
+        raise HTTPException(status_code=422, detail="Cannot add an expired batch")
+    medicine = Medicine(**payload.model_dump())
+    db.add(medicine)
+    try:
+        db.flush()
+        if medicine.quantity > 0:
+            db.add(StockMovement(
+                medicine_id=medicine.id,
+                movement_type="opening",
+                quantity_change=medicine.quantity,
+                reason="Initial stock",
+            ))
+        db.commit()
+        db.refresh(medicine)
+    except Exception as exc:
+        db.rollback()
+        if "unique" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="Batch number already exists")
+        raise HTTPException(status_code=400, detail="Could not save medicine")
+    return {"id": medicine.id, "message": "Medicine saved"}
+
+
+@app.put("/api/medicines/{medicine_id}", dependencies=[Depends(require_admin)])
+def update_medicine(
+    medicine_id: int, payload: MedicineUpdateInput,
+    db: Session = Depends(get_db)
+):
+    medicine = db.scalars(
+        select(Medicine)
+        .where(Medicine.id == medicine_id)
+        .with_for_update()
+    ).first()
+    if medicine is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    quantity_change = payload.quantity - medicine.quantity
+    reason = (payload.stock_change_reason or "").strip()
+
+    if quantity_change != 0 and len(reason) < 3:
+        raise HTTPException(
+            status_code=409,
+            detail="Provide a reason of at least 3 characters for the stock change",
+        )
+    if payload.expiry_date < date.today():
+        raise HTTPException(status_code=422, detail="Cannot set an expired batch")
+
+    for key, value in payload.model_dump(
+        exclude={"stock_change_reason"}
+    ).items():
+        setattr(medicine, key, value)
+
+    if quantity_change != 0:
+        db.add(StockMovement(
+            medicine_id=medicine.id,
+            movement_type="adjustment",
+            quantity_change=quantity_change,
+            reason=reason,
+        ))
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Could not update medicine")
+    return {"message": "Medicine updated"}
+
+
+@app.delete(
+    "/api/medicines/{medicine_id}",
+    status_code=204,
+    dependencies=[Depends(require_admin)]
+)
+def delete_medicine(medicine_id: int, db: Session = Depends(get_db)):
+    medicine = db.get(Medicine, medicine_id)
+    if medicine is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+    movement_id = db.scalar(
+        select(StockMovement.id)
+        .where(StockMovement.medicine_id == medicine_id)
+        .limit(1)
+    )
+    if movement_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a medicine with stock movement history",
+        )
+    db.delete(medicine)
+    db.commit()
+
+
+class StockChangeInput(BaseModel):
+    change: int = Field(ge=-100000, le=100000)
+    reason: str = Field(min_length=3, max_length=200)
+
+
+@app.post(
+    "/api/medicines/{medicine_id}/stock",
+    dependencies=[Depends(require_admin)],
+)
+def adjust_stock(
+    medicine_id: int,
+    payload: StockChangeInput,
+    db: Session = Depends(get_db),
+):
+    if payload.change == 0:
+        raise HTTPException(status_code=422, detail="Change must not be zero")
+
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="Reason must contain at least 3 non-space characters",
+        )
+
+    medicine = db.scalars(
+        select(Medicine)
+        .where(Medicine.id == medicine_id)
+        .with_for_update()
+    ).first()
+
+    if medicine is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+
+    new_quantity = medicine.quantity + payload.change
+    if new_quantity < 0:
+        raise HTTPException(status_code=409, detail="Stock cannot go below zero")
+
+    medicine.quantity = new_quantity
+    db.add(StockMovement(
+        medicine_id=medicine.id,
+        movement_type="adjustment",
+        quantity_change=payload.change,
+        reason=reason,
+    ))
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Stock adjustment failed")
+
+    return {"quantity": new_quantity}
+
+
+@app.get(
+    "/api/medicines/{medicine_id}/movements",
+    dependencies=[Depends(require_admin)],
+)
+def list_movements(medicine_id: int, db: Session = Depends(get_db)):
+    if db.get(Medicine, medicine_id) is None:
+        raise HTTPException(status_code=404, detail="Medicine not found")
+
+    rows = db.scalars(
+        select(StockMovement)
+        .where(StockMovement.medicine_id == medicine_id)
+        .order_by(StockMovement.id.desc())
+        .limit(200)
+    ).all()
+
+    return [
+        {
+            "id": row.id,
+            "type": row.movement_type,
+            "change": row.quantity_change,
+            "reason": row.reason,
+            "created_at": row.created_at.isoformat(),
+        }
+        for row in rows
+    ]
+
+
+
+# ===== Supplier Management =====
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    contact_person: Mapped[str] = mapped_column(String(160), default="")
+    phone: Mapped[str] = mapped_column(String(30), default="")
+    email: Mapped[str] = mapped_column(String(160), default="")
+    address: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SupplierInput(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    contact_person: str = Field(default="", max_length=160)
+    phone: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=160)
+    address: str = Field(default="", max_length=300)
+
+
+def supplier_dict(s):
+    return {
+        "id": s.id,
+        "name": s.name,
+        "contact_person": s.contact_person,
+        "phone": s.phone,
+        "email": s.email,
+        "address": s.address,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
+
+
+@app.get("/api/suppliers", dependencies=[Depends(require_admin)])
+def list_suppliers(db: Session = Depends(get_db)):
+    rows = db.scalars(select(Supplier).order_by(Supplier.name)).all()
+    return [supplier_dict(s) for s in rows]
+
+
+@app.post("/api/suppliers", status_code=201,
+          dependencies=[Depends(require_admin)])
+def create_supplier(payload: SupplierInput, db: Session = Depends(get_db)):
+    data = payload.model_dump()
+    data = {k: v.strip() for k, v in data.items()}
+    if not data["name"]:
+        raise HTTPException(422, "Supplier name is required")
+
+    exists = db.scalar(
+        select(Supplier.id).where(
+            func.lower(Supplier.name) == data["name"].lower()
+        )
+    )
+    if exists is not None:
+        raise HTTPException(409, "Supplier name already exists")
+
+    supplier = Supplier(**data)
+    db.add(supplier)
+    try:
+        db.commit()
+        db.refresh(supplier)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not create supplier")
+    return supplier_dict(supplier)
+
+
+@app.put("/api/suppliers/{supplier_id}",
+         dependencies=[Depends(require_admin)])
+def update_supplier(supplier_id: int, payload: SupplierInput,
+                    db: Session = Depends(get_db)):
+    supplier = db.get(Supplier, supplier_id)
+    if supplier is None:
+        raise HTTPException(404, "Supplier not found")
+
+    data = {k: v.strip() for k, v in payload.model_dump().items()}
+    if not data["name"]:
+        raise HTTPException(422, "Supplier name is required")
+
+    exists = db.scalar(
+        select(Supplier.id).where(
+            func.lower(Supplier.name) == data["name"].lower(),
+            Supplier.id != supplier_id
+        )
+    )
+    if exists is not None:
+        raise HTTPException(409, "Supplier name already exists")
+
+    for key, value in data.items():
+        setattr(supplier, key, value)
+
+    try:
+        db.commit()
+        db.refresh(supplier)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not update supplier")
+    return supplier_dict(supplier)
+
+
+@app.delete("/api/suppliers/{supplier_id}", status_code=204,
+            dependencies=[Depends(require_admin)])
+def delete_supplier(supplier_id: int, db: Session = Depends(get_db)):
+    supplier = db.get(Supplier, supplier_id)
+    if supplier is None:
+        raise HTTPException(404, "Supplier not found")
+
+    linked = db.scalar(
+        select(Medicine.id).where(
+            func.lower(Medicine.supplier) == supplier.name.lower()
+        ).limit(1)
+    )
+    if linked is not None:
+        raise HTTPException(
+            409, "Supplier is used by medicine inventory and cannot be deleted"
+        )
+
+    db.delete(supplier)
+    db.commit()
+
+
+# ===== End Supplier Management =====
+
+
+# ===== Purchase Orders =====
+
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_id: Mapped[int] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class PurchaseOrderItem(Base):
+    __tablename__ = "purchase_order_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    purchase_order_id: Mapped[int] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True
+    )
+    medicine_id: Mapped[int] = mapped_column(
+        ForeignKey("medicines.id", ondelete="RESTRICT")
+    )
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+
+class PurchaseItemInput(BaseModel):
+    medicine_id: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=100000)
+    unit_cost: Decimal = Field(
+        ge=0, max_digits=10, decimal_places=2
+    )
+
+
+class PurchaseOrderInput(BaseModel):
+    supplier_id: int = Field(gt=0)
+    items: list[PurchaseItemInput] = Field(min_length=1, max_length=100)
+
+
+def purchase_details(order, db):
+    supplier = db.get(Supplier, order.supplier_id)
+    items = db.scalars(
+        select(PurchaseOrderItem).where(
+            PurchaseOrderItem.purchase_order_id == order.id
+        ).order_by(PurchaseOrderItem.id)
+    ).all()
+
+    result = []
+    total = Decimal("0.00")
+    for item in items:
+        medicine = db.get(Medicine, item.medicine_id)
+        line_total = item.unit_cost * item.quantity
+        total += line_total
+        result.append({
+            "id": item.id,
+            "medicine_id": item.medicine_id,
+            "medicine": medicine.name if medicine else "Unknown",
+            "batch_number": medicine.batch_number if medicine else "",
+            "quantity": item.quantity,
+            "unit_cost": str(item.unit_cost),
+            "line_total": str(line_total),
+        })
+
+    return {
+        "id": order.id,
+        "supplier_id": order.supplier_id,
+        "supplier": supplier.name if supplier else "Unknown",
+        "status": order.status,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "received_at": order.received_at.isoformat() if order.received_at else None,
+        "items": result,
+        "total": str(total),
+    }
+
+
+@app.get("/api/purchase-orders", dependencies=[Depends(require_admin)])
+def list_purchase_orders(db: Session = Depends(get_db)):
+    orders = db.scalars(
+        select(PurchaseOrder).order_by(PurchaseOrder.id.desc())
+    ).all()
+    return [purchase_details(order, db) for order in orders]
+
+
+@app.get("/api/purchase-orders/{order_id}",
+         dependencies=[Depends(require_admin)])
+def get_purchase_order(order_id: int, db: Session = Depends(get_db)):
+    order = db.get(PurchaseOrder, order_id)
+    if order is None:
+        raise HTTPException(404, "Purchase order not found")
+    return purchase_details(order, db)
+
+
+@app.post("/api/purchase-orders", status_code=201,
+          dependencies=[Depends(require_admin)])
+def create_purchase_order(
+    payload: PurchaseOrderInput, db: Session = Depends(get_db)
+):
+    if db.get(Supplier, payload.supplier_id) is None:
+        raise HTTPException(404, "Supplier not found")
+
+    medicine_ids = [item.medicine_id for item in payload.items]
+    if len(medicine_ids) != len(set(medicine_ids)):
+        raise HTTPException(422, "Duplicate medicine batches in order")
+
+    for item in payload.items:
+        if db.get(Medicine, item.medicine_id) is None:
+            raise HTTPException(
+                404, f"Medicine {item.medicine_id} not found"
+            )
+
+    order = PurchaseOrder(
+        supplier_id=payload.supplier_id,
+        status="pending"
+    )
+    try:
+        db.add(order)
+        db.flush()
+
+        for item in payload.items:
+            db.add(PurchaseOrderItem(
+                purchase_order_id=order.id,
+                medicine_id=item.medicine_id,
+                quantity=item.quantity,
+                unit_cost=item.unit_cost,
+            ))
+
+        db.commit()
+        db.refresh(order)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not create purchase order")
+
+    return purchase_details(order, db)
+
+
+@app.post("/api/purchase-orders/{order_id}/receive",
+          dependencies=[Depends(require_admin)])
+def receive_purchase_order(
+    order_id: int, db: Session = Depends(get_db)
+):
+    order = db.scalars(
+        select(PurchaseOrder)
+        .where(PurchaseOrder.id == order_id)
+        .with_for_update()
+    ).first()
+
+    if order is None:
+        raise HTTPException(404, "Purchase order not found")
+
+    if order.status != "pending":
+        raise HTTPException(409, "Purchase order already received")
+
+    items = db.scalars(
+        select(PurchaseOrderItem).where(
+            PurchaseOrderItem.purchase_order_id == order.id
+        ).order_by(PurchaseOrderItem.medicine_id)
+    ).all()
+
+    if not items:
+        raise HTTPException(409, "Purchase order has no items")
+
+    for item in items:
+        medicine = db.scalars(
+            select(Medicine)
+            .where(Medicine.id == item.medicine_id)
+            .with_for_update()
+        ).first()
+
+        if medicine is None:
+            raise HTTPException(409, "Ordered medicine no longer exists")
+
+        if medicine.expiry_date < date.today():
+            raise HTTPException(
+                409, f"Cannot receive expired batch: {medicine.name}"
+            )
+
+        medicine.quantity += item.quantity
+
+        db.add(StockMovement(
+            medicine_id=medicine.id,
+            movement_type="purchase",
+            quantity_change=item.quantity,
+            reason=f"Purchase order #{order.id} received",
+        ))
+
+    order.status = "received"
+    order.received_at = datetime.now().astimezone()
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not receive purchase order")
+
+    return {
+        "message": "Purchase order received",
+        "order_id": order.id,
+        "status": order.status,
+    }
+
+
+# ===== End Purchase Orders =====
+
+
+# ===== Sales and Billing =====
+
+class PharmacySale(Base):
+    __tablename__ = "pharmacy_sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PharmacySaleItem(Base):
+    __tablename__ = "pharmacy_sale_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("pharmacy_sales.id", ondelete="RESTRICT"), index=True
+    )
+    medicine_id: Mapped[int] = mapped_column(
+        ForeignKey("medicines.id", ondelete="RESTRICT")
+    )
+    medicine_name: Mapped[str] = mapped_column(String(160))
+    batch_number: Mapped[str] = mapped_column(String(100))
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+
+class SaleItemInput(BaseModel):
+    medicine_id: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=100000)
+
+
+class SaleInput(BaseModel):
+    items: list[SaleItemInput] = Field(min_length=1, max_length=100)
+
+
+def sale_details(sale, db):
+    items = db.scalars(
+        select(PharmacySaleItem)
+        .where(PharmacySaleItem.sale_id == sale.id)
+        .order_by(PharmacySaleItem.id)
+    ).all()
+    return {
+        "id": sale.id,
+        "total": str(sale.total),
+        "created_at": sale.created_at.isoformat() if sale.created_at else None,
+        "items": [{
+            "medicine_id": item.medicine_id,
+            "medicine": item.medicine_name,
+            "batch_number": item.batch_number,
+            "quantity": item.quantity,
+            "unit_price": str(item.unit_price),
+            "line_total": str(item.quantity * item.unit_price),
+        } for item in items],
+    }
+
+
+@app.get("/api/sales", dependencies=[Depends(require_admin)])
+def list_sales(db: Session = Depends(get_db)):
+    sales = db.scalars(
+        select(PharmacySale).order_by(PharmacySale.id.desc()).limit(200)
+    ).all()
+    return [sale_details(s, db) for s in sales]
+
+
+@app.get("/api/sales/{sale_id}", dependencies=[Depends(require_admin)])
+def get_sale(sale_id: int, db: Session = Depends(get_db)):
+    sale = db.get(PharmacySale, sale_id)
+    if sale is None:
+        raise HTTPException(404, "Sale not found")
+    return sale_details(sale, db)
+
+
+@app.post("/api/sales", status_code=201,
+          dependencies=[Depends(require_admin)])
+def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
+    ids = [item.medicine_id for item in payload.items]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(422, "Duplicate medicine batches in sale")
+
+    # Lock medicine rows to prevent competing sales from overselling.
+    medicines_by_id = {}
+    for medicine_id in sorted(ids):
+        medicine = db.scalars(
+            select(Medicine)
+            .where(Medicine.id == medicine_id)
+            .with_for_update()
+        ).first()
+        if medicine is None:
+            raise HTTPException(404, f"Medicine {medicine_id} not found")
+        medicines_by_id[medicine_id] = medicine
+
+    total = Decimal("0.00")
+    for item in payload.items:
+        medicine = medicines_by_id[item.medicine_id]
+        if medicine.expiry_date <= date.today():
+            raise HTTPException(
+                409, f"Batch expired or expires today: {medicine.name}"
+            )
+        if medicine.quantity < item.quantity:
+            raise HTTPException(
+                409, f"Insufficient stock: {medicine.name}"
+            )
+        total += medicine.unit_price * item.quantity
+
+    try:
+        sale = PharmacySale(total=total)
+        db.add(sale)
+        db.flush()
+
+        for item in payload.items:
+            medicine = medicines_by_id[item.medicine_id]
+            db.add(PharmacySaleItem(
+                sale_id=sale.id,
+                medicine_id=medicine.id,
+                medicine_name=medicine.name,
+                batch_number=medicine.batch_number,
+                quantity=item.quantity,
+                unit_price=medicine.unit_price,
+            ))
+            medicine.quantity -= item.quantity
+            db.add(StockMovement(
+                medicine_id=medicine.id,
+                movement_type="sale",
+                quantity_change=-item.quantity,
+                reason=f"Sale #{sale.id}",
+            ))
+
+        db.commit()
+        db.refresh(sale)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not complete sale")
+
+    return sale_details(sale, db)
+
+
+# ===== End Sales and Billing =====
+
+
+# ===== Sales Returns & Refund Records =====
+
+class SaleReturn(Base):
+    __tablename__ = "sale_returns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sale_id: Mapped[int] = mapped_column(
+        ForeignKey("pharmacy_sales.id", ondelete="RESTRICT"),
+        index=True
+    )
+    reason: Mapped[str] = mapped_column(String(200))
+    refund_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SaleReturnItem(Base):
+    __tablename__ = "sale_return_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    return_id: Mapped[int] = mapped_column(
+        ForeignKey("sale_returns.id", ondelete="RESTRICT"),
+        index=True
+    )
+    sale_item_id: Mapped[int] = mapped_column(
+        ForeignKey("pharmacy_sale_items.id", ondelete="RESTRICT"),
+        index=True
+    )
+    medicine_name: Mapped[str] = mapped_column(String(160))
+    batch_number: Mapped[str] = mapped_column(String(100))
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+
+class ReturnItemInput(BaseModel):
+    medicine_id: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=100000)
+
+
+class ReturnInput(BaseModel):
+    sale_id: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=200)
+    items: list[ReturnItemInput] = Field(min_length=1, max_length=100)
+
+
+def return_details(record, db):
+    rows = db.scalars(
+        select(SaleReturnItem)
+        .where(SaleReturnItem.return_id == record.id)
+        .order_by(SaleReturnItem.id)
+    ).all()
+    return {
+        "id": record.id,
+        "sale_id": record.sale_id,
+        "reason": record.reason,
+        "refund_amount": str(record.refund_amount),
+        "refund_status": "recorded_not_paid",
+        "stock_disposition": "not_restocked",
+        "created_at": (
+            record.created_at.isoformat() if record.created_at else None
+        ),
+        "items": [{
+            "medicine": r.medicine_name,
+            "batch_number": r.batch_number,
+            "quantity": r.quantity,
+            "unit_price": str(r.unit_price),
+            "refund_amount": str(r.quantity * r.unit_price),
+        } for r in rows],
+    }
+
+
+@app.get("/api/returns", dependencies=[Depends(require_admin)])
+def list_returns(db: Session = Depends(get_db)):
+    records = db.scalars(
+        select(SaleReturn).order_by(SaleReturn.id.desc()).limit(200)
+    ).all()
+    return [return_details(r, db) for r in records]
+
+
+@app.get("/api/returns/{return_id}",
+         dependencies=[Depends(require_admin)])
+def get_return(return_id: int, db: Session = Depends(get_db)):
+    record = db.get(SaleReturn, return_id)
+    if record is None:
+        raise HTTPException(404, "Return not found")
+    return return_details(record, db)
+
+
+@app.post("/api/returns", status_code=201,
+          dependencies=[Depends(require_admin)])
+def create_return(payload: ReturnInput, db: Session = Depends(get_db)):
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(422, "Reason must have at least 3 characters")
+
+    medicine_ids = [i.medicine_id for i in payload.items]
+    if len(medicine_ids) != len(set(medicine_ids)):
+        raise HTTPException(422, "Duplicate medicine batches in return")
+
+    # Serialize returns for the same sale to prevent over-returning.
+    sale = db.scalars(
+        select(PharmacySale)
+        .where(PharmacySale.id == payload.sale_id)
+        .with_for_update()
+    ).first()
+    if sale is None:
+        raise HTTPException(404, "Sale not found")
+
+    sold_items = db.scalars(
+        select(PharmacySaleItem).where(
+            PharmacySaleItem.sale_id == sale.id
+        )
+    ).all()
+    sold_by_medicine = {i.medicine_id: i for i in sold_items}
+
+    existing = db.execute(
+        select(SaleReturnItem.sale_item_id, func.sum(SaleReturnItem.quantity))
+        .join(SaleReturn, SaleReturn.id == SaleReturnItem.return_id)
+        .where(SaleReturn.sale_id == sale.id)
+        .group_by(SaleReturnItem.sale_item_id)
+    ).all()
+    already_returned = {item_id: int(qty) for item_id, qty in existing}
+
+    total = Decimal("0.00")
+    validated = []
+    for requested in payload.items:
+        sold = sold_by_medicine.get(requested.medicine_id)
+        if sold is None:
+            raise HTTPException(
+                422, "Medicine was not included in the original sale"
+            )
+
+        remaining = sold.quantity - already_returned.get(sold.id, 0)
+        if requested.quantity > remaining:
+            raise HTTPException(
+                409,
+                f"Return exceeds remaining sold quantity for {sold.medicine_name}"
+            )
+
+        total += requested.quantity * sold.unit_price
+        validated.append((sold, requested.quantity))
+
+    try:
+        record = SaleReturn(
+            sale_id=sale.id,
+            reason=reason,
+            refund_amount=total
+        )
+        db.add(record)
+        db.flush()
+
+        for sold, qty in validated:
+            db.add(SaleReturnItem(
+                return_id=record.id,
+                sale_item_id=sold.id,
+                medicine_name=sold.medicine_name,
+                batch_number=sold.batch_number,
+                quantity=qty,
+                unit_price=sold.unit_price,
+            ))
+
+        # Returned medicines require separate inspection and
+        # disposition. Never auto-add them to sellable stock.
+        db.commit()
+        db.refresh(record)
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "Could not record return")
+
+    return return_details(record, db)
+
+
+# ===== End Sales Returns =====
+
+@app.get("/")
+def dashboard():
+    return FileResponse("app/static/index.html")
+
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")

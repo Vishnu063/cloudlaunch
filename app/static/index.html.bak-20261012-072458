@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PharmaCare — Inventory</title>
+<style>
+:root{--bg:#f5f7fb;--white:#fff;--ink:#192b43;--muted:#8290a5;--line:#e8edf4;--green:#16866d;--mint:#e7f6f0;--blue:#4478ed;--orange:#dc9131;--red:#d84d59;--shadow:0 5px 24px #233b5908}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}button,input,select{font:inherit}button{cursor:pointer}
+.layout{display:grid;grid-template-columns:238px minmax(0,1fr);min-height:100vh}.sidebar{background:#fff;border-right:1px solid var(--line);padding:26px 17px;display:flex;flex-direction:column;gap:32px}.brand{display:flex;align-items:center;gap:11px;padding:0 10px;font-weight:800;font-size:19px;letter-spacing:-.7px}.logo{width:38px;height:38px;border-radius:13px;background:var(--green);display:grid;place-items:center;color:#fff;font-size:25px}.brand small{display:block;color:var(--muted);font-size:10px;font-weight:500;letter-spacing:1.4px}.navlabel{font-size:10px;font-weight:800;color:#a0aabb;letter-spacing:1.5px;padding:0 12px;margin-bottom:8px}.navgroup{display:grid;gap:12px}.nav{display:grid;gap:5px}.nav button{border:0;background:transparent;text-align:left;color:#7b899e;border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px}.nav button.active{background:var(--mint);color:var(--green);font-weight:700}.nav .ico{width:22px;text-align:center;font-size:17px}.sidebottom{margin-top:auto;background:#f4faf8;border:1px solid #e3f1eb;padding:16px;border-radius:13px}.sidebottom strong{display:block;margin-bottom:5px}.sidebottom p{font-size:12px;color:var(--muted);margin:0}.main{min-width:0;padding:26px clamp(18px,3vw,42px) 45px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:32px}.crumb{font-size:12px;color:var(--muted)}.crumb b{color:var(--ink)}h1{font-size:27px;letter-spacing:-.8px;margin:5px 0 0}.profile{display:flex;align-items:center;gap:10px}.avatar{background:#dff2eb;color:#24765e;width:39px;height:39px;border-radius:50%;display:grid;place-items:center;font-weight:800}.profile small{display:block;color:var(--muted);font-size:11px}.btn{border:0;border-radius:9px;background:var(--green);color:#fff;padding:11px 16px;font-weight:700}.btn:hover{filter:brightness(.95)}.btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--line)}.headingrow{display:flex;justify-content:space-between;align-items:end;gap:15px;margin-bottom:21px}.headingrow p{margin:4px 0 0;color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}.stat,.panel{background:var(--white);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}.stat{padding:19px}.stathead{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:12px;gap:6px}.staticon{width:34px;height:34px;border-radius:10px;background:#eef4ff;display:grid;place-items:center;font-size:17px}.statvalue{font-size:28px;font-weight:800;letter-spacing:-1px;margin:12px 0 3px}.statfoot{font-size:11px;color:var(--muted)}.good{color:var(--green)}.warning{color:var(--orange)}.danger{color:var(--red)}.panel{overflow:hidden}.panelhead{padding:19px 21px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)}.panelhead h2{font-size:15px;margin:0}.panelhead p{margin:3px 0 0;color:var(--muted);font-size:12px}.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.search{width:min(260px,100%);border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#fff;outline:none}.search:focus,input:focus,select:focus{border-color:#81bfae;outline:2px solid #16866d15}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th{text-align:left;padding:12px 20px;background:#fbfcfe;color:#96a1b1;font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:800}td{padding:15px 20px;border-top:1px solid #f0f2f6;font-size:12px}tbody tr:hover{background:#fcfdfd}.medname{display:flex;align-items:center;gap:11px;font-weight:750;font-size:13px}.pillbox{width:35px;height:35px;border-radius:10px;background:#e8f4f1;color:var(--green);display:grid;place-items:center;font-size:17px}.sub{display:block;color:var(--muted);font-size:11px;font-weight:400}.badge{display:inline-block;padding:5px 9px;border-radius:20px;font-size:10px;font-weight:750}.badge.ok{background:#e5f5ec;color:#21825e}.badge.low{background:#fff1d9;color:#a56b17}.badge.exp{background:#ffe8e9;color:#c33d49}.below{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;margin-top:22px}.alertrow{display:flex;align-items:center;gap:12px;padding:15px 20px;border-top:1px solid #f0f2f6}.alertmark{width:34px;height:34px;border-radius:10px;background:#fff2df;display:grid;place-items:center}.alertrow strong{font-size:12px}.alertrow p{margin:3px 0 0;font-size:11px;color:var(--muted)}.alertcount{margin-left:auto;color:var(--orange);font-weight:800}.empty{padding:36px;text-align:center;color:var(--muted)}.loading{padding:24px;color:var(--muted)}.error{color:var(--red);padding:14px 20px;font-size:12px}.hidden{display:none!important}.modalback{position:fixed;inset:0;background:#10223b75;display:grid;place-items:center;padding:16px;z-index:5}.modal{background:white;width:min(600px,100%);border-radius:17px;padding:24px;max-height:90vh;overflow:auto;box-shadow:0 20px 70px #14243b35}.modalhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.modalhead h2{margin:0}.close{border:0;background:#f2f5f8;border-radius:8px;width:34px;height:34px;font-size:20px}.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:grid;gap:6px}.field label{font-size:12px;font-weight:700;color:#56677c}.field input,.field select{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;background:#fff}.wide{grid-column:1/-1}.formactions{display:flex;justify-content:end;gap:9px;margin-top:20px}.notice{padding:11px 13px;border-radius:9px;font-size:12px;margin-bottom:14px;background:#e7f6f0;color:#167459}.footer{margin-top:22px;text-align:center;color:#a0aabb;font-size:11px}
+@media(max-width:1050px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:205px minmax(0,1fr)}.below{grid-template-columns:1fr}}
+@media(max-width:650px){.layout{grid-template-columns:1fr}.sidebar{padding:12px 15px;gap:12px;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 3px}.nav{display:flex;overflow:auto}.navlabel,.sidebottom{display:none}.nav button{white-space:nowrap;padding:9px}.main{padding:20px 13px}.profile .person{display:none}.topbar{margin-bottom:24px}.headingrow{align-items:start;flex-direction:column}.stats{gap:9px}.stat{padding:13px}.statvalue{font-size:24px}.stathead{font-size:11px}.staticon{width:29px;height:29px}.panelhead{align-items:flex-start;flex-direction:column}.search{width:100%}.formgrid{grid-template-columns:1fr}.wide{grid-column:auto}h1{font-size:24px}}
+
+body:not(.authenticated) .layout{display:none}
+#loginScreen{min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg)}
+body.authenticated #loginScreen{display:none}
+.login-card{width:min(420px,100%);background:#fff;border:1px solid var(--line);border-radius:18px;padding:30px;box-shadow:var(--shadow)}
+.login-brand{display:flex;align-items:center;gap:12px;font-size:22px;font-weight:800;margin-bottom:25px}
+.login-card h1{font-size:25px;margin-bottom:6px}
+.login-card p{color:var(--muted);margin:0 0 22px}
+.login-card label{display:block;font-weight:700;font-size:12px;margin-bottom:7px}
+.login-card input{width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;margin-bottom:15px}
+.login-error{color:var(--red);font-size:12px;margin-bottom:12px}
+#logoutBtn{padding:8px 11px;font-size:12px}
+
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <section class="login-card">
+    <div class="login-brand"><div class="logo">✚</div><div>PharmaCare<small style="display:block;color:var(--muted);font-size:10px;letter-spacing:1.4px">PHARMACY OS</small></div></div>
+    <h1>Admin sign in</h1>
+    <p>Sign in to securely manage your pharmacy inventory.</p>
+    <form id="loginForm">
+      <label for="loginPassword">Admin password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required maxlength="256" placeholder="Enter admin password">
+      <div id="loginError" class="login-error" role="alert"></div>
+      <button class="btn" id="loginBtn" type="submit" style="width:100%">Sign in</button>
+    </form>
+  </section>
+</div>
+
+<div class="layout">
+<aside class="sidebar">
+  <div class="brand"><div class="logo">✚</div><div>PharmaCare<small>PHARMACY OS</small></div></div>
+  <div class="navgroup">
+<div class="navlabel">WORKSPACE</div><nav class="nav">
+<button class="active" data-view="overview"><span class="ico">▦</span>Overview</button>
+</nav>
+<div class="navlabel">INVENTORY</div><nav class="nav">
+<button data-view="inventory"><span class="ico">▤</span>Medicine inventory</button>
+<button data-view="medicine-details"><span class="ico">◉</span>Medicine details & batches</button>
+<button data-view="medicine-form"><span class="ico">＋</span>Add / edit medicine</button>
+<button data-view="categories"><span class="ico">▧</span>Categories</button>
+<button data-view="receive-stock"><span class="ico">↓</span>Receive stock</button>
+<button data-view="adjustments"><span class="ico">↕</span>Stock adjustments</button>
+<button data-view="movements"><span class="ico">↔</span>Movement history</button>
+<button data-view="reconciliation"><span class="ico">✓</span>Stock reconciliation</button>
+<button data-view="alerts"><span class="ico">♧</span>Stock & expiry alerts</button>
+<button data-view="expired"><span class="ico">◷</span>Expired / quarantine</button>
+</nav>
+<div class="navlabel">PURCHASING</div><nav class="nav">
+<button data-view="suppliers"><span class="ico">♙</span>Suppliers</button>
+<button data-view="supplier-form"><span class="ico">＋</span>Supplier form</button>
+<button data-view="purchase-orders"><span class="ico">▤</span>Purchase orders</button>
+<button data-view="purchase-details"><span class="ico">◫</span>Purchase order details</button>
+<button data-view="receive-orders"><span class="ico">↓</span>Receive purchase order</button>
+</nav>
+<div class="navlabel">SALES & CUSTOMERS</div><nav class="nav">
+<button data-view="billing"><span class="ico">▣</span>New sale / billing</button>
+<button data-view="sales-history"><span class="ico">◷</span>Sales history</button>
+<button data-view="sale-details"><span class="ico">▤</span>Sale details / receipt</button>
+<button data-view="returns"><span class="ico">↩</span>Returns / refunds</button>
+<button data-view="customers"><span class="ico">♙</span>Customers</button>
+<button data-view="prescriptions"><span class="ico">＋</span>Prescription records</button>
+<button data-view="prescription-details"><span class="ico">✓</span>Prescription safety checks</button>
+</nav>
+<div class="navlabel">REPORTS</div><nav class="nav">
+<button data-view="sales-report"><span class="ico">▥</span>Sales report</button>
+<button data-view="valuation"><span class="ico">₹</span>Inventory valuation</button>
+<button data-view="movement-report"><span class="ico">↔</span>Stock movement report</button>
+<button data-view="expiry-report"><span class="ico">◷</span>Expiry / wastage report</button>
+<button data-view="supplier-report"><span class="ico">▤</span>Supplier report</button>
+<button data-view="profit-loss"><span class="ico">₹</span>Profit / loss estimates</button>
+</nav>
+<div class="navlabel">ADMINISTRATION</div><nav class="nav">
+<button data-view="profile"><span class="ico">♙</span>Owner profile</button>
+<button data-view="password"><span class="ico">⌑</span>Change password</button>
+<button data-view="users"><span class="ico">♙</span>Users & roles</button>
+<button data-view="audit"><span class="ico">≡</span>Audit log</button>
+<button data-view="settings"><span class="ico">⚙</span>Pharmacy settings</button>
+<button data-view="backup"><span class="ico">▣</span>Backup / restore</button>
+<button data-view="health"><span class="ico">♥</span>Health & logs</button>
+<button data-view="notifications"><span class="ico">♧</span>Notifications</button>
+<button data-view="hardware"><span class="ico">▤</span>Barcode / printer setup</button>
+</nav>
+</div>
+  <div class="sidebottom"><strong>Inventory health</strong><p>Keep stock accurate and identify medicines that need attention.</p></div>
+</aside>
+<main class="main">
+  <header class="topbar"><div><div class="crumb">Workspace / <b id="crumb">Overview</b></div><h1 id="pageTitle">Good day, pharmacist 👋</h1></div><div class="profile"><div class="avatar">PC</div><div class="person"><strong>Pharmacy Admin</strong><small>Inventory manager</small></div></div></header>
+  <section class="headingrow"><div><h2 id="sectionTitle">Your pharmacy at a glance</h2><p id="sectionSub">Live inventory data from your pharmacy database.</p></div><button class="btn" id="addBtn">＋ Add medicine</button></section>
+  <section class="stats">
+    <article class="stat"><div class="stathead">Medicine products <span class="staticon">▤</span></div><div class="statvalue" id="medCount">—</div><div class="statfoot">Unique inventory batches</div></article>
+    <article class="stat"><div class="stathead">Units in stock <span class="staticon">▦</span></div><div class="statvalue" id="units">—</div><div class="statfoot">Total available units</div></article>
+    <article class="stat"><div class="stathead">Low-stock items <span class="staticon">⚑</span></div><div class="statvalue warning" id="lowCount">—</div><div class="statfoot">At or below reorder level</div></article>
+    <article class="stat"><div class="stathead">Expiring in 90 days <span class="staticon">◷</span></div><div class="statvalue danger" id="expCount">—</div><div class="statfoot">Review these batches soon</div></article>
+  </section>
+  <section class="panel">
+    <div class="panelhead"><div><h2 id="tableTitle">Medicine inventory</h2><p>Search and manage your registered medicine batches</p></div><div class="tools"><input class="search" id="search" placeholder="⌕  Search medicines, batches..." aria-label="Search medicines"><button class="btn secondary" id="refreshBtn">↻ Refresh</button></div></div>
+    <div id="error" class="error hidden"></div>
+    <div class="tablewrap"><table><thead><tr><th>Medicine</th><th>Batch no.</th><th>Stock</th><th>Unit price</th><th>Expiry date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="medicineRows"><tr><td colspan="7" class="loading">Connecting to pharmacy database…</td></tr></tbody></table></div>
+  </section>
+  <div class="below">
+    <section class="panel"><div class="panelhead"><div><h2>Needs attention</h2><p>Low stock and approaching expiry</p></div></div><div id="alertsList"><div class="loading">Loading alerts…</div></div></section>
+    <section class="panel"><div class="panelhead"><div><h2>Inventory value</h2><p>Estimated value at recorded unit prices</p></div></div><div style="padding:22px"><div class="statvalue" id="inventoryValue">₹—</div><p style="color:var(--muted);font-size:12px;margin:4px 0 18px">Calculated from quantity × unit price.</p><div style="height:7px;background:#eaf0f4;border-radius:9px;overflow:hidden"><div id="stockBar" style="height:100%;width:0;background:var(--green);border-radius:9px;transition:width .3s"></div></div><p style="font-size:11px;color:var(--muted)">Stock threshold coverage</p></div></section>
+  </div>
+  <div class="footer">PharmaCare · Inventory management · Connected to your application database</div>
+</main>
+</div>
+<div class="modalback hidden" id="modal">
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modalhead"><h2 id="modalTitle">Add medicine</h2><button class="close" id="closeModal" aria-label="Close">×</button></div>
+    <div id="formNotice" class="notice hidden"></div>
+    <form id="medicineForm">
+      <div class="formgrid">
+        <div class="field"><label for="name">Medicine name *</label><input id="name" name="name" required maxlength="160" placeholder="e.g. Paracetamol 500mg"></div>
+        <div class="field"><label for="category">Category</label><select id="category" name="category"><option>General</option><option>Analgesic</option><option>Antibiotic</option><option>Vitamin & Supplement</option><option>Antacid</option><option>Allergy</option><option>First Aid</option><option>Other</option></select></div>
+        <div class="field"><label for="batch_number">Batch number *</label><input id="batch_number" name="batch_number" required maxlength="100" placeholder="e.g. PCM-26001"></div>
+        <div class="field"><label for="supplier">Supplier</label><input id="supplier" name="supplier" maxlength="160" placeholder="Supplier name"></div>
+        <div class="field"><label for="quantity">Quantity (units) *</label><input id="quantity" name="quantity" type="number" min="0" step="1" required value="100"></div>
+        <div class="field hidden" id="stockReasonField"><label for="stock_change_reason">Reason for stock change *</label><input id="stock_change_reason" name="stock_change_reason" maxlength="200" placeholder="e.g. Physical stock recount"></div>
+        <div class="field"><label for="reorder_level">Reorder level *</label><input id="reorder_level" name="reorder_level" type="number" min="0" step="1" required value="10"></div>
+        <div class="field"><label for="unit_price">Unit price (₹) *</label><input id="unit_price" name="unit_price" type="number" min="0" step="0.01" required placeholder="0.00"></div>
+        <div class="field"><label for="expiry_date">Expiry date *</label><input id="expiry_date" name="expiry_date" type="date" required></div>
+      </div>
+      <div class="formactions"><button class="btn secondary" type="button" id="cancelBtn">Cancel</button><button class="btn" type="submit" id="saveBtn">Save medicine</button></div>
+    </form>
+  </section>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let medicines=[],view='overview';
+const today=new Date();today.setHours(0,0,0,0);
+$('expiry_date').min=new Date(Date.now()+86400000).toISOString().slice(0,10);
+function money(value){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(Number(value)||0)}
+function daysTo(date){return Math.ceil((new Date(date+'T00:00:00')-today)/86400000)}
+function status(m){if(daysTo(m.expiry_date)<0)return ['Expired','exp'];if(daysTo(m.expiry_date)<=90)return ['Expiring','exp'];if(m.quantity<=m.reorder_level)return ['Low stock','low'];return ['In stock','ok']}
+function showError(message){$('error').textContent=message;$('error').classList.remove('hidden')}
+function clearError(){$('error').textContent='';$('error').classList.add('hidden')}
+async function request(url,options){const res=await fetch(url,options);if(!res.ok){let msg='Request failed ('+res.status+')';try{const body=await res.json();msg=body.detail||msg}catch{}throw Error(msg)}if(res.status===204)return null;return res.json()}
+async function load(){
+ clearError();$('medicineRows').innerHTML='<tr><td colspan="7" class="loading">Loading live inventory…</td></tr>';
+ try{
+  const [summary,data]=await Promise.all([request('/api/summary'),request('/api/medicines')]);medicines=data;
+  $('medCount').textContent=summary.medicine_count.toLocaleString('en-IN');$('units').textContent=summary.units_in_stock.toLocaleString('en-IN');$('lowCount').textContent=summary.low_stock_count.toLocaleString('en-IN');$('expCount').textContent=summary.expiring_soon_count.toLocaleString('en-IN');$('inventoryValue').textContent=money(summary.inventory_value);
+  const coverage=summary.medicine_count?Math.round((summary.medicine_count-summary.low_stock_count)/summary.medicine_count*100):0;$('stockBar').style.width=Math.max(0,Math.min(100,coverage))+'%';
+  render();renderAlerts();
+ }catch(e){$('medicineRows').innerHTML='<tr><td colspan="7" class="empty">Could not load inventory. Check the application and database.</td></tr>';showError(e.message)}
+}
+function render(){
+ const q=$('search').value.trim().toLowerCase();
+ let rows=medicines.filter(m=>[m.name,m.category,m.batch_number,m.supplier].some(v=>(v||'').toLowerCase().includes(q)));
+ if(view==='alerts')rows=rows.filter(m=>status(m)[1]!=='ok');
+ if(view==='expired'){
+  rows=rows.filter(m=>daysTo(m.expiry_date)<=90);
+  rows.sort((a,b)=>a.expiry_date.localeCompare(b.expiry_date));
+ }
+
+ if(!rows.length){$('medicineRows').innerHTML='<tr><td colspan="7" class="empty">'+(medicines.length?'No medicines match this filter.':'No medicines yet. Add your first medicine to begin.')+'</td></tr>';return}
+ $('medicineRows').innerHTML=rows.map(m=>{const s=status(m);return `<tr><td><div class="medname"><div class="pillbox">✚</div><div>${esc(m.name)}<span class="sub">${esc(m.category||'General')}</span></div></div></td><td>${esc(m.batch_number)}</td><td><strong>${m.quantity}</strong><span class="sub">Reorder at ${m.reorder_level}</span></td><td>${money(m.unit_price)}</td><td>${esc(m.expiry_date)}<span class="sub">${daysTo(m.expiry_date)<0?'Expired':daysTo(m.expiry_date)+' days left'}</span></td><td><span class="badge ${s[1]}">${s[0]}</span></td><td><button class="btn secondary" data-details="${m.id}" style="padding:6px 9px;font-size:11px">Details</button> <button class="btn secondary" data-edit="${m.id}" style="padding:6px 9px;font-size:11px">Edit</button> <button class="btn secondary" data-delete="${m.id}" style="padding:6px 9px;font-size:11px;color:#c33d49">Delete</button></td></tr>`}).join('');
+}
+async function openDetails(m){
+ const modalId='detailsModal';
+ let modal=$(modalId);
+ if(!modal){
+  modal=document.createElement('div');
+  modal.id=modalId;
+  modal.className='modalback hidden';
+  modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
+   <div class="modalhead"><h2 id="detailsTitle">Medicine batch details</h2><button class="close" id="detailsClose" aria-label="Close">×</button></div>
+   <div id="detailsContent"></div>
+   <h3 style="margin-top:24px;font-size:14px">Stock movement history</h3>
+   <div id="movementContent" class="loading">Loading movement history…</div>
+   <div class="formactions"><button class="btn secondary" id="detailsDone">Close</button></div>
+  </section>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{
+   if(e.target===modal||e.target.id==='detailsClose'||e.target.id==='detailsDone')modal.classList.add('hidden');
+  });
+ }
+ $('detailsTitle').textContent=m.name+' — Batch '+m.batch_number;
+ const st=status(m);
+ $('detailsContent').innerHTML=`<div class="formgrid">
+  <div class="field"><label>Medicine</label><div>${esc(m.name)}</div></div>
+  <div class="field"><label>Category</label><div>${esc(m.category||'General')}</div></div>
+  <div class="field"><label>Batch number</label><div>${esc(m.batch_number)}</div></div>
+  <div class="field"><label>Supplier</label><div>${esc(m.supplier||'Not recorded')}</div></div>
+  <div class="field"><label>Current stock</label><div><strong>${m.quantity}</strong> units</div></div>
+  <div class="field"><label>Reorder level</label><div>${m.reorder_level} units</div></div>
+  <div class="field"><label>Unit price</label><div>${money(m.unit_price)}</div></div>
+  <div class="field"><label>Stock value</label><div>${money(m.quantity*m.unit_price)}</div></div>
+  <div class="field"><label>Expiry date</label><div>${esc(m.expiry_date)}</div></div>
+  <div class="field"><label>Status</label><div><span class="badge ${st[1]}">${st[0]}</span></div></div>
+ </div>`;
+ $('movementContent').textContent='Loading movement history…';
+ modal.classList.remove('hidden');
+ try{
+  const result=await request('/api/medicines/'+m.id+'/movements');
+  const movements=Array.isArray(result)?result:(result.movements||[]);
+  if(!movements.length){
+   $('movementContent').innerHTML='<div class="empty">No stock movements recorded.</div>';
+   return;
+  }
+  $('movementContent').innerHTML=`<div class="tablewrap"><table>
+   <thead><tr><th>Date</th><th>Type</th><th>Quantity change</th><th>Reason</th></tr></thead>
+   <tbody>${movements.map(x=>`<tr>
+    <td>${esc(x.created_at?new Date(x.created_at).toLocaleString('en-IN'):'—')}</td>
+    <td>${esc(x.type||'—')}</td>
+    <td><strong>${Number(x.change)>0?'+':''}${Number(x.change)||0}</strong></td>
+    <td>${esc(x.reason||'—')}</td>
+   </tr>`).join('')}</tbody></table></div>`;
+ }catch(err){
+  $('movementContent').textContent='Could not load movement history: '+err.message;
+ }
+}
+
+function openStockScreen(mode){
+ const receiving=mode==='receive-stock';
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="stockTitle">
+  <div class="modalhead">
+   <h2 id="stockTitle">${receiving?'Receive stock':'Stock adjustment'}</h2>
+   <button type="button" class="close" data-stock-close aria-label="Close">×</button>
+  </div>
+  <form id="stockActionForm">
+   <div class="formgrid">
+    <div class="field">
+     <label for="stockMedicine">Medicine / batch</label>
+     <select id="stockMedicine" required>
+      <option value="">Select medicine</option>
+      ${medicines.map(m=>`<option value="${m.id}">${esc(m.name)} — ${esc(m.batch_number)} (${m.quantity} units)</option>`).join('')}
+     </select>
+    </div>
+    <div class="field">
+     <label for="stockQuantity">${receiving?'Quantity received':'Quantity to adjust'}</label>
+     <input id="stockQuantity" type="number" min="1" max="100000" step="1" required placeholder="Enter units">
+    </div>
+    ${receiving?'':`<div class="field">
+     <label for="stockDirection">Adjustment type</label>
+     <select id="stockDirection">
+      <option value="out">Remove stock</option>
+      <option value="in">Add stock</option>
+     </select>
+    </div>`}
+    <div class="field">
+     <label for="stockReason">Reason</label>
+     <input id="stockReason" maxlength="200" required minlength="3"
+      placeholder="${receiving?'Stock received from supplier':'Damage, correction, return, etc.'}">
+    </div>
+   </div>
+   <div id="stockActionError" class="error hidden" role="alert"></div>
+   <div class="formactions">
+    <button type="button" class="btn secondary" data-stock-close>Cancel</button>
+    <button type="submit" class="btn" id="stockSubmit">Save stock change</button>
+   </div>
+  </form>
+ </section>`;
+ document.body.appendChild(modal);
+ const close=()=>modal.remove();
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-stock-close]'))close();
+ });
+ const onKey=e=>{
+  if(e.key==='Escape'){close();document.removeEventListener('keydown',onKey)}
+ };
+ document.addEventListener('keydown',onKey);
+ const form=modal.querySelector('#stockActionForm');
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const id=Number(modal.querySelector('#stockMedicine').value);
+  const qty=Number(modal.querySelector('#stockQuantity').value);
+  const reason=modal.querySelector('#stockReason').value.trim();
+  const direction=receiving?'in':modal.querySelector('#stockDirection').value;
+  const error=modal.querySelector('#stockActionError');
+  error.classList.add('hidden');
+  if(!id||!Number.isSafeInteger(qty)||qty<1||qty>100000||reason.length<3){
+   error.textContent='Select a medicine, valid quantity, and reason (at least 3 characters).';
+   error.classList.remove('hidden');
+   return;
+  }
+  const change=direction==='out'?-qty:qty;
+  const medicine=medicines.find(m=>m.id===id);
+  if(!medicine)return;
+  if(medicine.quantity+change<0){
+   error.textContent='Insufficient stock. Available: '+medicine.quantity;
+   error.classList.remove('hidden');
+   return;
+  }
+  const submit=modal.querySelector('#stockSubmit');
+  submit.disabled=true;
+  try{
+   await request('/api/medicines/'+id+'/stock',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({change,reason})
+   });
+   close();
+   document.removeEventListener('keydown',onKey);
+   await load();
+  }catch(err){
+   error.textContent=err.message;
+   error.classList.remove('hidden');
+  }finally{
+   submit.disabled=false;
+  }
+ });
+}
+
+
+function openMovementHistory(){
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+  <div class="modalhead">
+   <h2 id="historyTitle">Stock movement history</h2>
+   <button class="close" type="button" data-history-close aria-label="Close">×</button>
+  </div>
+  <div class="field">
+   <label for="historyMedicine">Select medicine / batch</label>
+   <select id="historyMedicine">
+    <option value="">Choose a medicine</option>
+    ${medicines.map(m=>`<option value="${m.id}">${esc(m.name)} — ${esc(m.batch_number)}</option>`).join('')}
+   </select>
+  </div>
+  <div id="historyResults" style="margin-top:18px">
+   <div class="empty">Select a medicine to see its stock transactions.</div>
+  </div>
+  <div class="formactions">
+   <button class="btn secondary" type="button" data-history-close>Close</button>
+  </div>
+ </section>`;
+ document.body.appendChild(modal);
+ const close=()=>{
+  document.removeEventListener('keydown',onKey);
+  modal.remove();
+ };
+ const onKey=e=>{if(e.key==='Escape')close()};
+ document.addEventListener('keydown',onKey);
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-history-close]'))close();
+ });
+ const select=modal.querySelector('#historyMedicine');
+ const results=modal.querySelector('#historyResults');
+ let currentRequest=0;
+ select.addEventListener('change',async()=>{
+  const id=Number(select.value);
+  const token=++currentRequest;
+  if(!id){
+   results.innerHTML='<div class="empty">Select a medicine to see its stock transactions.</div>';
+   return;
+  }
+  results.textContent='Loading transactions…';
+  try{
+   const rows=await request('/api/medicines/'+id+'/movements');
+   if(token!==currentRequest||!modal.isConnected)return;
+   if(!Array.isArray(rows)||!rows.length){
+    results.innerHTML='<div class="empty">No stock movements recorded.</div>';
+    return;
+   }
+   results.innerHTML=`<div class="tablewrap"><table>
+    <thead><tr><th>Date</th><th>Type</th><th>Change</th><th>Reason</th></tr></thead>
+    <tbody>${rows.map(x=>`<tr>
+     <td>${esc(x.created_at?new Date(x.created_at).toLocaleString('en-IN'):'—')}</td>
+     <td>${esc(x.type||'—')}</td>
+     <td><strong>${Number(x.change)>0?'+':''}${Number(x.change)||0}</strong></td>
+     <td>${esc(x.reason||'—')}</td>
+    </tr>`).join('')}</tbody>
+   </table></div>`;
+  }catch(err){
+   if(token===currentRequest&&modal.isConnected){
+    results.textContent='Could not load transactions: '+err.message;
+   }
+  }
+ });
+}
+
+
+function openReconciliation(){
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="reconcileTitle">
+  <div class="modalhead">
+   <h2 id="reconcileTitle">Stock reconciliation</h2>
+   <button class="close" type="button" data-reconcile-close>×</button>
+  </div>
+  <form id="reconcileForm">
+   <div class="formgrid">
+    <div class="field">
+     <label for="recMedicine">Medicine / batch</label>
+     <select id="recMedicine" required>
+      <option value="">Select medicine</option>
+      ${medicines.map(m=>`<option value="${m.id}">${esc(m.name)} — ${esc(m.batch_number)}</option>`).join('')}
+     </select>
+    </div>
+    <div class="field">
+     <label>Recorded stock</label>
+     <div id="recRecorded">—</div>
+    </div>
+    <div class="field">
+     <label for="recActual">Physical stock counted</label>
+     <input id="recActual" type="number" min="0" step="1" required>
+    </div>
+    <div class="field">
+     <label>Difference</label>
+     <div id="recDifference">—</div>
+    </div>
+    <div class="field">
+     <label for="recReason">Reason</label>
+     <input id="recReason" maxlength="200" minlength="3" required
+      placeholder="Physical stock count correction">
+    </div>
+   </div>
+   <div id="recError" class="error hidden" role="alert"></div>
+   <div class="formactions">
+    <button type="button" class="btn secondary" data-reconcile-close>Cancel</button>
+    <button type="submit" class="btn" id="recSave">Reconcile stock</button>
+   </div>
+  </form>
+ </section>`;
+
+ document.body.appendChild(modal);
+ const close=()=>{
+  document.removeEventListener('keydown',onKey);
+  modal.remove();
+ };
+ const onKey=e=>{if(e.key==='Escape')close()};
+ document.addEventListener('keydown',onKey);
+
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-reconcile-close]'))close();
+ });
+
+ const select=modal.querySelector('#recMedicine');
+ const actual=modal.querySelector('#recActual');
+ const difference=modal.querySelector('#recDifference');
+ const recorded=modal.querySelector('#recRecorded');
+ const error=modal.querySelector('#recError');
+
+ function currentMedicine(){
+  return medicines.find(m=>m.id===Number(select.value));
+ }
+ function calculate(){
+  const m=currentMedicine();
+  recorded.textContent=m?m.quantity+' units':'—';
+  const qty=actual.value.trim()===''?NaN:Number(actual.value);
+  difference.textContent=m&&Number.isSafeInteger(qty)&&qty>=0
+   ?(qty-m.quantity>0?'+':'')+(qty-m.quantity)+' units'
+   :'—';
+ }
+ select.addEventListener('change',()=>{
+  actual.value='';
+  calculate();
+ });
+ actual.addEventListener('input',calculate);
+
+ modal.querySelector('#reconcileForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  error.classList.add('hidden');
+  const m=currentMedicine();
+  const qty=actual.value.trim()===''?NaN:Number(actual.value);
+  const reason=modal.querySelector('#recReason').value.trim();
+  if(!m||!Number.isSafeInteger(qty)||qty<0||reason.length<3){
+   error.textContent='Select a medicine, enter valid physical stock and a reason.';
+   error.classList.remove('hidden');
+   return;
+  }
+  const button=modal.querySelector('#recSave');
+  button.disabled=true;
+  try{
+   const latest=await request('/api/medicines');
+   const live=latest.find(x=>x.id===m.id);
+   if(!live)throw Error('Medicine no longer exists.');
+   if(live.quantity!==m.quantity){
+    throw Error('Recorded stock changed. Close and reopen reconciliation to refresh.');
+   }
+   const change=qty-live.quantity;
+   if(change===0){
+    close();
+    return;
+   }
+   if(Math.abs(change)>100000){
+    throw Error('Difference exceeds the maximum allowed adjustment (100,000 units).');
+   }
+   if(!confirm(`Adjust ${m.name} stock from ${live.quantity} to ${qty} units?`)){
+    return;
+   }
+   await request('/api/medicines/'+m.id+'/stock',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({change,reason:'Stock reconciliation: '+reason})
+   });
+   close();
+   await load();
+  }catch(err){
+   error.textContent=err.message;
+   error.classList.remove('hidden');
+  }finally{
+   button.disabled=false;
+  }
+ });
+}
+
+
+function openCategories(){
+ const groups=new Map();
+
+ medicines.forEach(m=>{
+  const name=(m.category||'General').trim()||'General';
+  if(!groups.has(name)){
+   groups.set(name,{name,count:0,stock:0,value:0});
+  }
+  const g=groups.get(name);
+  g.count++;
+  g.stock+=Number(m.quantity)||0;
+  g.value+=(Number(m.quantity)||0)*(Number(m.unit_price)||0);
+ });
+
+ const rows=[...groups.values()].sort((a,b)=>a.name.localeCompare(b.name));
+
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="categoriesTitle">
+  <div class="modalhead">
+   <h2 id="categoriesTitle">Medicine categories</h2>
+   <button class="close" type="button" data-category-close aria-label="Close">×</button>
+  </div>
+  <p style="margin-bottom:15px">${rows.length} categories found</p>
+  <div class="tablewrap">
+   <table>
+    <thead><tr>
+     <th>Category</th>
+     <th>Medicines / batches</th>
+     <th>Stock units</th>
+     <th>Inventory value</th>
+    </tr></thead>
+    <tbody>
+     ${rows.length?rows.map(g=>`<tr>
+      <td><strong>${esc(g.name)}</strong></td>
+      <td>${g.count}</td>
+      <td>${g.stock}</td>
+      <td>${money(g.value)}</td>
+     </tr>`).join(''):
+     '<tr><td colspan="4" class="empty">No categories available.</td></tr>'}
+    </tbody>
+   </table>
+  </div>
+  <div class="formactions">
+   <button class="btn secondary" type="button" data-category-close>Close</button>
+  </div>
+ </section>`;
+
+ document.body.appendChild(modal);
+
+ const close=()=>{
+  document.removeEventListener('keydown',onKey);
+  modal.remove();
+ };
+ const onKey=e=>{if(e.key==='Escape')close()};
+ document.addEventListener('keydown',onKey);
+
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-category-close]'))close();
+ });
+}
+
+
+function openValuation(){
+ const rows=[...medicines].sort((a,b)=>a.name.localeCompare(b.name));
+ const total=rows.reduce((sum,m)=>sum+Number(m.quantity)*Number(m.unit_price),0);
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="valuationTitle">
+  <div class="modalhead">
+   <h2 id="valuationTitle">Inventory valuation</h2>
+   <button type="button" class="close" data-valuation-close>×</button>
+  </div>
+  <h3 style="margin-bottom:15px">Total inventory value: ${money(total)}</h3>
+  <div class="tablewrap">
+   <table>
+    <thead><tr>
+     <th>Medicine</th><th>Batch</th><th>Quantity</th>
+     <th>Unit price</th><th>Stock value</th>
+    </tr></thead>
+    <tbody>${rows.length?rows.map(m=>`<tr>
+     <td>${esc(m.name)}</td>
+     <td>${esc(m.batch_number)}</td>
+     <td>${m.quantity}</td>
+     <td>${money(m.unit_price)}</td>
+     <td><strong>${money(Number(m.quantity)*Number(m.unit_price))}</strong></td>
+    </tr>`).join(''):'<tr><td colspan="5" class="empty">No inventory available.</td></tr>'}
+    </tbody>
+   </table>
+  </div>
+  <div class="formactions">
+   <button type="button" class="btn secondary" data-valuation-close>Close</button>
+  </div>
+ </section>`;
+ document.body.appendChild(modal);
+ const close=()=>{
+  document.removeEventListener('keydown',onKey);
+  modal.remove();
+ };
+ const onKey=e=>{if(e.key==='Escape')close()};
+ document.addEventListener('keydown',onKey);
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-valuation-close]'))close();
+ });
+}
+
+
+async function openMovementReport(){
+ const modal=document.createElement('div');
+ modal.className='modalback';
+ modal.innerHTML=`<section class="modal" role="dialog" aria-modal="true" aria-labelledby="movementReportTitle">
+  <div class="modalhead">
+   <h2 id="movementReportTitle">Stock movement report</h2>
+   <button class="close" type="button" data-report-close>×</button>
+  </div>
+  <div id="movementReportContent">Loading movement report…</div>
+  <div class="formactions">
+   <button type="button" class="btn secondary" data-report-close>Close</button>
+  </div>
+ </section>`;
+ document.body.appendChild(modal);
+
+ const close=()=>{
+  document.removeEventListener('keydown',onKey);
+  modal.remove();
+ };
+ const onKey=e=>{if(e.key==='Escape')close()};
+ document.addEventListener('keydown',onKey);
+ modal.addEventListener('click',e=>{
+  if(e.target===modal||e.target.closest('[data-report-close]'))close();
+ });
+
+ const content=modal.querySelector('#movementReportContent');
+
+ try{
+  const results=await Promise.all(
+   medicines.map(async m=>{
+    const movements=await request('/api/medicines/'+m.id+'/movements');
+    return movements.map(x=>({
+     ...x,
+     medicine:m.name,
+     batch:m.batch_number
+    }));
+   })
+  );
+
+  if(!modal.isConnected)return;
+
+  const rows=results.flat().sort(
+   (a,b)=>new Date(b.created_at)-new Date(a.created_at)
+  );
+
+  const stockIn=rows.reduce(
+   (sum,x)=>sum+Math.max(0,Number(x.change)||0),0
+  );
+  const stockOut=rows.reduce(
+   (sum,x)=>sum+Math.max(0,-Number(x.change)||0),0
+  );
+
+  content.innerHTML=`
+   <div style="margin-bottom:16px">
+    <strong>Total stock in:</strong> ${stockIn} units
+    &nbsp; | &nbsp;
+    <strong>Total stock out:</strong> ${stockOut} units
+    <p style="font-size:12px;margin-top:6px">Latest 200 movements per medicine, including opening stock.</p>
+   </div>
+   <div class="tablewrap">
+    <table>
+     <thead><tr>
+      <th>Date</th><th>Medicine</th><th>Batch</th>
+      <th>Type</th><th>Change</th><th>Reason</th>
+     </tr></thead>
+     <tbody>${rows.length?rows.map(x=>`<tr>
+      <td>${esc(x.created_at?new Date(x.created_at).toLocaleString('en-IN'):'—')}</td>
+      <td>${esc(x.medicine)}</td>
+      <td>${esc(x.batch)}</td>
+      <td>${esc(x.type||'—')}</td>
+      <td><strong>${Number(x.change)>0?'+':''}${Number(x.change)||0}</strong></td>
+      <td>${esc(x.reason||'—')}</td>
+     </tr>`).join(''):
+     '<tr><td colspan="6" class="empty">No stock movements found.</td></tr>'}
+     </tbody>
+    </table>
+   </div>`;
+ }catch(err){
+  if(modal.isConnected){
+   content.textContent='Could not load report: '+err.message;
+  }
+ }
+}
+
+function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function renderAlerts(){
+ const alerts=medicines.filter(m=>status(m)[1]!=='ok').sort((a,b)=>daysTo(a.expiry_date)-daysTo(b.expiry_date));
+ if(!alerts.length){$('alertsList').innerHTML='<div class="empty">All clear — no stock or expiry alerts.</div>';return}
+ $('alertsList').innerHTML=alerts.slice(0,6).map(m=>{const s=status(m);return `<div class="alertrow"><div class="alertmark">${s[1]==='exp'?'◷':'⚑'}</div><div><strong>${esc(m.name)}</strong><p>${esc(m.batch_number)} · ${s[1]==='exp'?(daysTo(m.expiry_date)<0?'Expired':`Expires in ${daysTo(m.expiry_date)} days`):`${m.quantity} units remaining`}</p></div><span class="alertcount">${s[1]==='exp'?'Expiry':'Low stock'}</span></div>`}).join('');
+}
+function openModal(m=null){
+ $('medicineForm').reset();$('formNotice').classList.add('hidden');
+ $('medicineForm').dataset.editId=m?.id||'';
+ $('medicineForm').dataset.originalQuantity=m?String(m.quantity):'';
+ $('stockReasonField').classList.add('hidden');
+ $('stock_change_reason').required=false;
+ $('stock_change_reason').value='';
+ $('modalTitle').textContent=m?'Edit medicine':'Add medicine';$('saveBtn').textContent=m?'Update medicine':'Save medicine';
+ $('expiry_date').min=new Date().toISOString().slice(0,10);
+ if(m)for(const [k,v] of Object.entries(m)){const input=$('medicineForm').elements.namedItem(k);if(input)input.value=v}
+ $('modal').classList.remove('hidden');$('name').focus();
+}
+$('quantity').addEventListener('input',()=>{
+ const form=$('medicineForm');
+ const changed=!!form.dataset.editId &&
+   Number($('quantity').value)!==Number(form.dataset.originalQuantity);
+ $('stockReasonField').classList.toggle('hidden',!changed);
+ $('stock_change_reason').required=changed;
+ if(!changed)$('stock_change_reason').value='';
+});
+function closeModal(){$('modal').classList.add('hidden')}
+$('addBtn').addEventListener('click',()=>openModal());
+$('closeModal').addEventListener('click',closeModal);$('cancelBtn').addEventListener('click',closeModal);
+$('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+$('refreshBtn').addEventListener('click',load);$('search').addEventListener('input',render);
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{
+ const next=b.dataset.view;
+ if(next==='movement-report'){
+  clearError();openMovementReport();return;
+ }
+ if(next==='valuation'){
+  clearError();openValuation();return;
+ }
+ if(next==='medicine-form'){
+  clearError();
+  openModal();
+  return;
+ }
+ if(next==='categories'){
+  clearError();openCategories();return;
+ }
+ if(next==='reconciliation'){
+  clearError();openReconciliation();return;
+ }
+ if(next==='movements'){
+  clearError();openMovementHistory();return;
+ }
+ if(next==='receive-stock'||next==='adjustments'){
+  clearError();openStockScreen(next);return;
+ }
+ if(!['overview','inventory','alerts','medicine-details','expired'].includes(next)){
+  showError('This screen is planned but not implemented yet.');
+  return;
+ }
+ clearError();
+ view=next;
+ document.querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x===b));
+ const title=view==='overview'?'Overview':view==='inventory'?'Medicine inventory':view==='medicine-details'?'Medicine details & batches':view==='expired'?'Expired / Quarantine':'Stock & expiry alerts';
+ $('crumb').textContent=title;
+ $('pageTitle').textContent=view==='overview'?'Good day, pharmacist 👋':title;
+ $('sectionTitle').textContent=view==='overview'?'Your pharmacy at a glance':title;
+ $('sectionSub').textContent=view==='alerts'?'Batches requiring stock or expiry review.':'Live inventory data from your pharmacy database.';
+ render();
+}));
+$('medicineForm').addEventListener('submit',async e=>{
+ e.preventDefault();const form=e.currentTarget;const payload=Object.fromEntries(new FormData(form).entries());
+ for(const k of ['quantity','reorder_level'])payload[k]=Number(payload[k]);payload.unit_price=Number(payload.unit_price);
+ $('saveBtn').disabled=true;$('saveBtn').textContent='Saving…';
+ try{const id=form.dataset.editId;await request(id?'/api/medicines/'+id:'/api/medicines',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});closeModal();await load()}
+ catch(err){$('formNotice').textContent=err.message;$('formNotice').classList.remove('hidden')}
+ finally{$('saveBtn').disabled=false;$('saveBtn').textContent=form.dataset.editId?'Update medicine':'Save medicine'}
+});
+$('medicineRows').addEventListener('click',async e=>{
+ const details=e.target.closest('[data-details]');const edit=e.target.closest('[data-edit]');const del=e.target.closest('[data-delete]');
+ if(details){const m=medicines.find(x=>x.id===Number(details.dataset.details));if(m)await openDetails(m)}
+ if(edit){const m=medicines.find(x=>x.id===Number(edit.dataset.edit));if(m)openModal(m)}
+ if(del){const m=medicines.find(x=>x.id===Number(del.dataset.delete));if(m&&confirm(`Delete ${m.name} (batch ${m.batch_number})? This cannot be undone.`)){try{await request('/api/medicines/'+m.id,{method:'DELETE'});await load()}catch(err){showError(err.message)}}}
+});
+
+async function startSession(){
+ try{
+  const r=await fetch('/api/auth');
+  if(!r.ok)throw Error('Unable to check login status');
+  const data=await r.json();
+  if(data.authenticated)showDashboard();
+ }catch(e){
+  $('loginError').textContent='Cannot connect to the application. Please refresh and try again.';
+ }
+}
+function showDashboard(){
+ document.body.classList.add('authenticated');
+ if(!$('logoutBtn')){
+  const b=document.createElement('button');
+  b.id='logoutBtn';b.className='btn secondary';b.textContent='Sign out';
+  b.addEventListener('click',async()=>{
+   try{await request('/api/logout',{method:'POST'})}catch(e){}
+   document.body.classList.remove('authenticated');
+   $('loginPassword').value='';
+   $('loginError').textContent='';
+  });
+  document.querySelector('.profile').appendChild(b);
+ }
+ load();
+}
+$('loginForm').addEventListener('submit',async e=>{
+ e.preventDefault();
+ const btn=$('loginBtn');
+ btn.disabled=true;btn.textContent='Signing in…';$('loginError').textContent='';
+ try{
+  await request('/api/login',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({password:$('loginPassword').value})
+  });
+  $('loginPassword').value='';
+  showDashboard();
+ }catch(err){
+  $('loginError').textContent=err.message==='Invalid password'?'Incorrect password. Please try again.':'Login failed. Please try again.';
+ }finally{
+  btn.disabled=false;btn.textContent='Sign in';
+ }
+});
+startSession();
+
+</script>
+</body>
+</html>
