@@ -4,6 +4,7 @@ import hashlib
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
+from app.backend.gst import calculate_gst, money
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -719,6 +720,16 @@ class PharmacySale(Base):
     __tablename__ = "pharmacy_sales"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(50), unique=True)
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="RESTRICT"), nullable=True
+    )
+    subtotal: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    discount_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    taxable_total: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    cgst_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    sgst_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    igst_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -739,15 +750,31 @@ class PharmacySaleItem(Base):
     batch_number: Mapped[str] = mapped_column(String(100))
     quantity: Mapped[int] = mapped_column(Integer)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    taxable_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    gst_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
+    cgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    sgst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    igst_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
+    hsn_code: Mapped[str | None] = mapped_column(String(20))
 
 
 class SaleItemInput(BaseModel):
     medicine_id: int = Field(gt=0)
     quantity: int = Field(gt=0, le=100000)
+    gst_rate: Decimal = Field(
+        default=Decimal("0"), ge=0, le=100, decimal_places=2
+    )
+    discount_amount: Decimal = Field(
+        default=Decimal("0"), ge=0, max_digits=12, decimal_places=2
+    )
+    hsn_code: str | None = Field(default=None, max_length=20)
 
 
 class SaleInput(BaseModel):
     items: list[SaleItemInput] = Field(min_length=1, max_length=100)
+    customer_id: int | None = Field(default=None, gt=0)
+    interstate: bool = False
 
 
 def sale_details(sale, db):
@@ -758,6 +785,14 @@ def sale_details(sale, db):
     ).all()
     return {
         "id": sale.id,
+        "invoice_number": sale.invoice_number,
+        "customer_id": sale.customer_id,
+        "subtotal": str(sale.subtotal or Decimal("0")),
+        "discount_total": str(sale.discount_total or Decimal("0")),
+        "taxable_total": str(sale.taxable_total or Decimal("0")),
+        "cgst_total": str(sale.cgst_total or Decimal("0")),
+        "sgst_total": str(sale.sgst_total or Decimal("0")),
+        "igst_total": str(sale.igst_total or Decimal("0")),
         "total": str(sale.total),
         "created_at": sale.created_at.isoformat() if sale.created_at else None,
         "items": [{
@@ -766,7 +801,19 @@ def sale_details(sale, db):
             "batch_number": item.batch_number,
             "quantity": item.quantity,
             "unit_price": str(item.unit_price),
-            "line_total": str(item.quantity * item.unit_price),
+            "discount_amount": str(item.discount_amount or Decimal("0")),
+            "taxable_amount": str(item.taxable_amount or Decimal("0")),
+            "gst_rate": str(item.gst_rate or Decimal("0")),
+            "cgst_amount": str(item.cgst_amount or Decimal("0")),
+            "sgst_amount": str(item.sgst_amount or Decimal("0")),
+            "igst_amount": str(item.igst_amount or Decimal("0")),
+            "hsn_code": item.hsn_code,
+            "line_total": str(money(
+                (item.taxable_amount or Decimal("0"))
+                + (item.cgst_amount or Decimal("0"))
+                + (item.sgst_amount or Decimal("0"))
+                + (item.igst_amount or Decimal("0"))
+            )),
         } for item in items],
     }
 
@@ -794,7 +841,10 @@ def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
     if len(ids) != len(set(ids)):
         raise HTTPException(422, "Duplicate medicine batches in sale")
 
-    # Lock medicine rows to prevent competing sales from overselling.
+    if payload.customer_id is not None:
+        if db.get(Customer, payload.customer_id) is None:
+            raise HTTPException(404, "Customer not found")
+
     medicines_by_id = {}
     for medicine_id in sorted(ids):
         medicine = db.scalars(
@@ -806,26 +856,56 @@ def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
             raise HTTPException(404, f"Medicine {medicine_id} not found")
         medicines_by_id[medicine_id] = medicine
 
-    total = Decimal("0.00")
+    calculated = []
+    totals = {
+        key: Decimal("0.00")
+        for key in (
+            "subtotal", "discount", "taxable",
+            "cgst", "sgst", "igst", "total"
+        )
+    }
+
     for item in payload.items:
         medicine = medicines_by_id[item.medicine_id]
+
         if medicine.expiry_date <= date.today():
-            raise HTTPException(
-                409, f"Batch expired or expires today: {medicine.name}"
-            )
+            raise HTTPException(409, f"Expired batch: {medicine.name}")
+
         if medicine.quantity < item.quantity:
-            raise HTTPException(
-                409, f"Insufficient stock: {medicine.name}"
+            raise HTTPException(409, f"Insufficient stock: {medicine.name}")
+
+        try:
+            result = calculate_gst(
+                medicine.unit_price,
+                item.quantity,
+                item.gst_rate,
+                item.discount_amount,
+                payload.interstate,
             )
-        total += medicine.unit_price * item.quantity
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+        calculated.append((item, medicine, result))
+        for key in totals:
+            totals[key] += result[key]
 
     try:
-        sale = PharmacySale(total=total)
+        sale = PharmacySale(
+            customer_id=payload.customer_id,
+            subtotal=money(totals["subtotal"]),
+            discount_total=money(totals["discount"]),
+            taxable_total=money(totals["taxable"]),
+            cgst_total=money(totals["cgst"]),
+            sgst_total=money(totals["sgst"]),
+            igst_total=money(totals["igst"]),
+            total=money(totals["total"]),
+        )
         db.add(sale)
         db.flush()
 
-        for item in payload.items:
-            medicine = medicines_by_id[item.medicine_id]
+        sale.invoice_number = f"PC-{date.today().year}-{sale.id:06d}"
+
+        for item, medicine, result in calculated:
             db.add(PharmacySaleItem(
                 sale_id=sale.id,
                 medicine_id=medicine.id,
@@ -833,7 +913,15 @@ def create_sale(payload: SaleInput, db: Session = Depends(get_db)):
                 batch_number=medicine.batch_number,
                 quantity=item.quantity,
                 unit_price=medicine.unit_price,
+                discount_amount=result["discount"],
+                taxable_amount=result["taxable"],
+                gst_rate=result["gst_rate"],
+                cgst_amount=result["cgst"],
+                sgst_amount=result["sgst"],
+                igst_amount=result["igst"],
+                hsn_code=item.hsn_code,
             ))
+
             medicine.quantity -= item.quantity
             db.add(StockMovement(
                 medicine_id=medicine.id,
@@ -906,6 +994,39 @@ def return_details(record, db):
         .where(SaleReturnItem.return_id == record.id)
         .order_by(SaleReturnItem.id)
     ).all()
+
+    details = []
+    for r in rows:
+        sold = db.get(PharmacySaleItem, r.sale_item_id)
+
+        previous = db.scalar(
+            select(func.coalesce(func.sum(SaleReturnItem.quantity), 0))
+            .where(
+                SaleReturnItem.sale_item_id == r.sale_item_id,
+                SaleReturnItem.return_id < record.id,
+            )
+        ) or 0
+
+        original_total = money(
+            (sold.taxable_amount or Decimal("0"))
+            + (sold.cgst_amount or Decimal("0"))
+            + (sold.sgst_amount or Decimal("0"))
+            + (sold.igst_amount or Decimal("0"))
+        )
+
+        refund = (
+            money(original_total * (previous + r.quantity) / sold.quantity)
+            - money(original_total * previous / sold.quantity)
+        )
+
+        details.append({
+            "medicine": r.medicine_name,
+            "batch_number": r.batch_number,
+            "quantity": r.quantity,
+            "unit_price": str(r.unit_price),
+            "refund_amount": str(refund),
+        })
+
     return {
         "id": record.id,
         "sale_id": record.sale_id,
@@ -916,13 +1037,7 @@ def return_details(record, db):
         "created_at": (
             record.created_at.isoformat() if record.created_at else None
         ),
-        "items": [{
-            "medicine": r.medicine_name,
-            "batch_number": r.batch_number,
-            "quantity": r.quantity,
-            "unit_price": str(r.unit_price),
-            "refund_amount": str(r.quantity * r.unit_price),
-        } for r in rows],
+        "items": details,
     }
 
 
@@ -994,7 +1109,22 @@ def create_return(payload: ReturnInput, db: Session = Depends(get_db)):
                 f"Return exceeds remaining sold quantity for {sold.medicine_name}"
             )
 
-        total += requested.quantity * sold.unit_price
+        original_total = money(
+            (sold.taxable_amount or Decimal("0"))
+            + (sold.cgst_amount or Decimal("0"))
+            + (sold.sgst_amount or Decimal("0"))
+            + (sold.igst_amount or Decimal("0"))
+        )
+        previously_returned = already_returned.get(sold.id, 0)
+        after_return = previously_returned + requested.quantity
+
+        # Cumulative rounding prevents over/under-refunding
+        # across multiple partial returns.
+        refund = (
+            money(original_total * after_return / sold.quantity)
+            - money(original_total * previously_returned / sold.quantity)
+        )
+        total += refund
         validated.append((sold, requested.quantity))
 
     try:

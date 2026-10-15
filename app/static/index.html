@@ -1251,7 +1251,43 @@ async function openSalesScreen(mode='billing'){
     <button class="btn" id="salesPrint" type="button">Print receipt</button>
    </div>`;
 
-  content.querySelector('#salesBack').onclick=history;
+
+  // GST invoice summary generated from saved backend amounts.
+  const receiptArea = content.querySelector('#receiptArea');
+  if(receiptArea && !receiptArea.querySelector('#gstInvoiceSummary')){
+    const summary = document.createElement('section');
+    summary.id = 'gstInvoiceSummary';
+    summary.style.cssText = 'margin-top:20px;padding-top:14px;border-top:2px solid #333';
+
+    const rows = [
+      ['Subtotal',s.subtotal],
+      ['Discount',s.discount_total],
+      ['Taxable amount',s.taxable_total],
+      ['CGST',s.cgst_total],
+      ['SGST',s.sgst_total],
+      ['IGST',s.igst_total],
+      ['Grand total',s.total]
+    ];
+
+    summary.innerHTML = `
+      <h3>Tax Invoice: ${esc(s.invoice_number || 'Draft')}</h3>
+      <table style="width:100%;border-collapse:collapse">
+      ${rows.map(([label,value])=>`
+        <tr>
+          <td style="padding:6px">${esc(label)}</td>
+          <td style="padding:6px;text-align:right">
+            ${money(value || 0)}
+          </td>
+        </tr>`).join('')}
+      </table>
+      <p style="font-size:11px;margin-top:10px">
+        GST amounts shown are based on the rates recorded for this sale.
+      </p>`;
+
+    receiptArea.appendChild(summary);
+  }
+
+content.querySelector('#salesBack').onclick=history;
   content.querySelector('#salesPrint').onclick=()=>{
    const html=content.querySelector('#receiptArea').innerHTML;
    const w=window.open('','_blank','width=800,height=700');
@@ -1309,6 +1345,9 @@ async function openSalesScreen(mode='billing'){
   );
   content.innerHTML=`<form id="salesForm">
    <div id="saleItems"></div>
+  <label style="display:block;margin:12px 0">
+    <input type="checkbox" id="saleInterstate"> Interstate sale (IGST)
+  </label>
    <button type="button" class="btn secondary" id="addSaleItem">+ Add medicine</button>
    <h3 id="saleTotal" style="margin-top:18px">Total: ₹0.00</h3>
    <div id="saleError" class="error hidden" role="alert"></div>
@@ -1326,9 +1365,11 @@ async function openSalesScreen(mode='billing'){
    items.querySelectorAll('.saleRow').forEach(row=>{
     const id=Number(row.querySelector('.saleMedicine').value);
     const qty=Number(row.querySelector('.saleQty').value);
+    const rate=Number(row.querySelector('.saleGst').value);
+    const discount=Number(row.querySelector('.saleDiscount').value)||0;
     const m=available.find(x=>x.id===id);
     if(m && Number.isSafeInteger(qty) && qty>0)
-     sum+=qty*Number(m.unit_price);
+     sum+=Math.max(0,qty*Number(m.unit_price)-discount)*(1+rate/100);
    });
    total.textContent='Total: '+money(sum);
   }
@@ -1351,12 +1392,22 @@ async function openSalesScreen(mode='billing'){
      <input type="number" class="saleQty" min="1" max="100000"
       step="1" required>
     </div>
+    <div class="field"><label>GST %</label>
+      <input type="number" class="saleGst" min="0" max="100"
+        step="0.01" value="0" required>
+    </div>
+    <div class="field"><label>Discount ₹</label>
+      <input type="number" class="saleDiscount" min="0"
+        step="0.01" value="0" required>
+    </div>
     <div class="field"><label>Remove</label>
      <button type="button" class="btn secondary saleRemove">Remove</button>
     </div>`;
    items.appendChild(row);
    row.querySelector('.saleMedicine').onchange=calculate;
    row.querySelector('.saleQty').oninput=calculate;
+   row.querySelector('.saleGst').oninput=calculate;
+   row.querySelector('.saleDiscount').oninput=calculate;
    row.querySelector('.saleRemove').onclick=()=>{row.remove();calculate()};
   }
 
@@ -1370,7 +1421,9 @@ async function openSalesScreen(mode='billing'){
    error.classList.add('hidden');
    const rows=[...items.querySelectorAll('.saleRow')].map(row=>({
     medicine_id:Number(row.querySelector('.saleMedicine').value),
-    quantity:Number(row.querySelector('.saleQty').value)
+    quantity:Number(row.querySelector('.saleQty').value),
+    gst_rate:row.querySelector('.saleGst').value,
+    discount_amount:row.querySelector('.saleDiscount').value
    }));
    if(!rows.length || rows.some(x=>!x.medicine_id||
       !Number.isSafeInteger(x.quantity)||x.quantity<1||
@@ -1395,7 +1448,10 @@ async function openSalesScreen(mode='billing'){
     const sale=await request('/api/sales',{
      method:'POST',
      headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({items:rows})
+     body:JSON.stringify({
+      items:rows,
+      interstate:content.querySelector('#saleInterstate').checked
+    })
     });
     await load();
     if(modal.isConnected)receipt(sale);
