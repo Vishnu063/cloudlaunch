@@ -389,7 +389,7 @@ function daysTo(date){return Math.ceil((new Date(date+'T00:00:00')-today)/864000
 function status(m){if(daysTo(m.expiry_date)<0)return ['Expired','exp'];if(daysTo(m.expiry_date)<=90)return ['Expiring','exp'];if(m.quantity<=m.reorder_level)return ['Low stock','low'];return ['In stock','ok']}
 function showError(message){$('error').textContent=message;$('error').classList.remove('hidden')}
 function clearError(){$('error').textContent='';$('error').classList.add('hidden')}
-async function request(url,options){const res=await fetch(url.startsWith('/api/')?'/pharmacy'+url:url,options);if(!res.ok){let msg='Request failed ('+res.status+')';try{const body=await res.json();msg=body.detail||msg}catch{}throw Error(msg)}if(res.status===204)return null;return res.json()}
+async function request(url,options){const res=await fetch(url,options);if(!res.ok){let msg='Request failed ('+res.status+')';try{const body=await res.json();msg=body.detail||msg}catch{}throw Error(msg)}if(res.status===204)return null;return res.json()}
 async function load(){
  clearError();$('medicineRows').innerHTML='<tr><td colspan="7" class="loading">Loading live inventory…</td></tr>';
  try{
@@ -3122,7 +3122,7 @@ $('medicineRows').addEventListener('click',async e=>{
 
 async function startSession(){
  try{
-  const r=await fetch('/pharmacy/api/auth');
+  const r=await fetch('/api/auth');
   if(!r.ok)throw Error('Unable to check login status');
   const data=await r.json();
   if(data.authenticated)showDashboard();
@@ -3573,7 +3573,7 @@ startSession();
 
     panel.querySelector("#pcStaffLogout").onclick=async()=>{
       try {
-        await fetch("/pharmacy/api/logout",{
+        await fetch("/api/logout",{
           method:"POST",credentials:"same-origin"
         });
       }finally{
@@ -3582,7 +3582,7 @@ startSession();
     };
 
     try{
-      const response=await fetch("/pharmacy/api/staff/inventory",{
+      const response=await fetch("/api/staff/inventory",{
         credentials:"same-origin"
       });
       if(!response.ok) throw Error("Inventory unavailable: "+response.status);
@@ -3609,7 +3609,7 @@ startSession();
   });
 
   // Restore the restricted staff view after a page refresh.
-  fetch("/pharmacy/api/auth",{credentials:"same-origin"})
+  fetch("/api/auth",{credentials:"same-origin"})
     .then(r=>r.ok?r.json():null)
     .then(auth=>{
       if(auth?.authenticated && auth.role && auth.role!=="owner"){
@@ -3638,7 +3638,7 @@ startSession();
     }[c])
   );
 
-  const apiBase = new URL("api/", new URL("/pharmacy/", location.origin));
+  const apiBase = new URL("api/", new URL("/", location.origin));
 
   async function api(path, options = {}) {
     const res = await fetch(new URL(path, apiBase), {
