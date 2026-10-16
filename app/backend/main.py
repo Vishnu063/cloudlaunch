@@ -147,7 +147,7 @@ app.add_middleware(
     session_cookie="pharmacy_session",
     max_age=28800,
     same_site="strict",
-    https_only=False,
+    https_only=True,
 )
 
 
