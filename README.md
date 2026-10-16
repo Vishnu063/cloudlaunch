@@ -1,3 +1,5 @@
+> **Review this project:** [Source map, walkthrough, and evidence limits](INTERVIEW.md).
+
 # PharmaCare — Pharmacy Management System
 
 A pharmacy management project built with **FastAPI, PostgreSQL, Docker Compose, and Nginx**. It covers stock and medicine batches, suppliers, purchasing, sales, customers, prescription records, reporting, and staff accounts with role-based access control (RBAC).
