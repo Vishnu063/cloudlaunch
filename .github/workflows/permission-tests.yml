@@ -1,0 +1,22 @@
+name: Staff permission tests
+on:
+  push:
+    paths:
+      - 'app/backend/permissions.py'
+      - 'tests/test_permissions.py'
+      - '.github/workflows/permission-tests.yml'
+  pull_request:
+    paths:
+      - 'app/backend/permissions.py'
+      - 'app/backend/main.py'
+      - 'tests/test_permissions.py'
+jobs:
+  permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run policy regression tests
+        run: python -m unittest discover -s tests -p 'test_permissions.py' -v
