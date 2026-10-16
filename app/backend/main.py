@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from app.backend.gst import calculate_gst, money
+from app.backend.permissions import can_access
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -95,17 +96,37 @@ def verify_password(password: str) -> bool:
 
 
 def require_admin(request: Request):
-    if request.session.get("admin") is not True:
+    """Authorize the owner or staff with explicitly permitted API access.
+
+    Existing route dependencies call this function; unidentified routes remain
+    owner-only. Never trust a role supplied by the browser.
+    """
+    if request.session.get("admin") is True:
+        with SessionLocal() as db:
+            credential = db.get(AdminCredential, 1)
+            if credential is not None:
+                if request.session.get("auth_version") != credential.session_version:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Session expired. Please log in again"
+                    )
+        return
+
+    staff_id = request.session.get("staff_id")
+    if not isinstance(staff_id, int) or isinstance(staff_id, bool):
         raise HTTPException(status_code=401, detail="Login required")
 
     with SessionLocal() as db:
-        credential = db.get(AdminCredential, 1)
-        if credential is not None:
-            if request.session.get("auth_version") != credential.session_version:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Session expired. Please log in again"
-                )
+        staff = db.get(StaffUser, staff_id)
+        if (
+            staff is None
+            or not staff.active
+            or request.session.get("staff_version") != staff.session_version
+        ):
+            raise HTTPException(status_code=401, detail="Staff session expired")
+
+        if not can_access(staff.role, request.method, request.url.path):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
 
 
 @asynccontextmanager
