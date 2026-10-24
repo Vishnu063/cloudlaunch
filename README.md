@@ -238,3 +238,8 @@ A complete recovery plan still needs successful backups, off-instance encrypted 
 **Repository:** [Vishnu063/cloudlaunch](https://github.com/Vishnu063/cloudlaunch). Contributions should avoid committing secrets, sensitive data, generated backup files or local machine state.
 
 This project is provided for learning and development. Its current behavior should not be interpreted as certified medical, financial or regulatory functionality.
+
+
+## Optional DevOps ecosystem integration
+
+CloudLaunch remains the build/deployment owner. The existing pharmacy pipeline is preserved; optional structured release reporting, immutable Git release tags and Trivy checks are described in [the integration guide](docs/ECOSYSTEM.md). The separate `demo/Dockerfile` and `scripts/deploy-ecosystem-demo.py` build a stateless owned sample for the cross-project failure/recovery lab; they never touch pharmacy containers, data or credentials. No model or paid API is introduced. Reporting tests run separately from the existing pharmacy tests; Jenkins runtime, live customer deployment and production rollback are not claimed by this repository change.

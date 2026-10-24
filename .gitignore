@@ -29,3 +29,6 @@ __pycache__/
 naming
 unpacking
 *.backup
+
+.ecosystem-state/
+
