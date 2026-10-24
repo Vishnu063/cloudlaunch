@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import socket
 import subprocess
 
 LABEL='io.cloudlaunch.ecosystem-demo'
@@ -19,9 +20,19 @@ def deploy(root):
     token=secrets.token_hex(10);tag='cloudlaunch-ecosystem-demo:'+release
     docker('build','-t',tag,'-f',str(root/'demo/Dockerfile'),str(root))
     image=docker('image','inspect','--format','{{.Id}}',tag)
-    cid=docker('run','-d','--label',LABEL+'='+token,'--name','cleco-'+token,'--memory','64m','--cpus','0.25',
-      '--pids-limit','32','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges',
-      '-p','127.0.0.1::8080',image)
+    # Keep the chosen host port explicit: Docker's empty HostPort may be reallocated on restart.
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1',0));host_port=reservation.getsockname()[1]
+    try:
+        cid=docker('run','-d','--label',LABEL+'='+token,'--name','cleco-'+token,'--memory','64m','--cpus','0.25',
+          '--pids-limit','32','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges',
+          '-p',f'127.0.0.1:{host_port}:8080',image)
+    except (OSError,subprocess.SubprocessError) as error:
+        try:cleanup({'container':'cleco-'+token,'token':token})
+        except (OSError,ValueError,subprocess.SubprocessError):
+            raise RuntimeError('Sample start failed; cleanup unverified. Inspect only the recorded owned candidate cleco-'+token) from error
+        raise
+
     try:
         mapping=docker('port',cid,'8080/tcp')
         if not re.fullmatch(r'127\.0\.0\.1:[0-9]+',mapping):raise ValueError('Unexpected port mapping')

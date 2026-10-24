@@ -12,3 +12,11 @@ class ReportingTests(unittest.TestCase):
    self.assertIn('cloudlaunch_deployment_status{status="healthy"} 1',(Path(root)/'release.prom').read_text())
  def test_unknown_outcome_is_refused(self):
   with self.assertRaises(ValueError):module.report('pretend-success','unused')
+
+class DeployerBoundaryTests(unittest.TestCase):
+ def test_cleanup_refuses_a_foreign_container(self):
+  spec=importlib.util.spec_from_file_location('deployer',Path(__file__).resolve().parents[1]/'scripts/deploy-ecosystem-demo.py')
+  deployer=importlib.util.module_from_spec(spec);spec.loader.exec_module(deployer)
+  with patch.object(deployer,'docker',return_value='[{"Config":{"Labels":{"io.cloudlaunch.ecosystem-demo":"foreign"}}}]') as command:
+   with self.assertRaises(ValueError):deployer.cleanup({'container':'candidate','token':'owned'})
+   self.assertEqual(1,command.call_count)
