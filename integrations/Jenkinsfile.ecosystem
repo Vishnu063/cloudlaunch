@@ -1,0 +1,44 @@
+// Opt-in disposable integration job. This never reads /home/ubuntu/cloudlaunch/.env.
+// Requires a local Docker agent, trusted monitoring binaries and sibling checkouts.
+pipeline {
+    agent any
+    options { timestamps(); disableConcurrentBuilds(); timeout(time: 20, unit: 'MINUTES') }
+    parameters {
+        string(name: 'ECOSYSTEM_ROOT', defaultValue: '', description: 'Absolute parent of the five reviewed checkouts on this disposable agent')
+        string(name: 'MONITORING_TOOLS', defaultValue: '', description: 'Absolute path to trusted prometheus/promtool/alertmanager/amtool binaries')
+        booleanParam(name: 'RUN_DISPOSABLE_FAILURE', defaultValue: false, description: 'Authorize only the labelled lab app stop and one reviewed restart; never production')
+    }
+    stages {
+        stage('Validate scope') {
+            steps {
+                sh '''#!/bin/sh
+set -eu
+[ "$RUN_DISPOSABLE_FAILURE" = true ]
+case "$ECOSYSTEM_ROOT" in /*) ;; *) exit 2 ;; esac
+case "$MONITORING_TOOLS" in /*) ;; *) exit 2 ;; esac
+for repo in cloudlaunch devops_platform ops-pilot devops-triage-assistant devops-troubleshooting-labs; do
+  test -d "$ECOSYSTEM_ROOT/$repo/.git"
+done
+'''
+            }
+        }
+        stage('Disposable deployment and recovery acceptance') {
+            steps {
+                sh '''#!/bin/sh
+set -eu
+"$ECOSYSTEM_ROOT/ecosystem-venv/bin/python" \
+  "$ECOSYSTEM_ROOT/devops-troubleshooting-labs/integrations/ecosystem_lab.py" \
+  --workspace "$ECOSYSTEM_ROOT" --tools "$MONITORING_TOOLS" \
+  --output "$WORKSPACE/ecosystem-evidence" --allow-disposable-failure
+'''
+            }
+        }
+    }
+    post {
+        always {
+            // Only the summary is archived; runtime config and incident evidence
+            // are private and may contain application identifiers.
+            archiveArtifacts artifacts: 'ecosystem-evidence/result.json', allowEmptyArchive: true
+        }
+    }
+}

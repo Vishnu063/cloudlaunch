@@ -7,11 +7,11 @@ from sqlalchemy import delete, select
 
 from app.backend import main
 
-main.app.dependency_overrides[main.require_admin] = lambda: None
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setitem(main.app.dependency_overrides, main.require_admin, lambda: None)
     with TestClient(main.app) as c:
         yield c
 

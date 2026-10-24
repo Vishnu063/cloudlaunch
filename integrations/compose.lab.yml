@@ -1,0 +1,37 @@
+# Standalone disposable stack. Never merge into the production compose project.
+services:
+  db:
+    profiles: [ecosystem-lab]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pharmacy_test
+      POSTGRES_USER: pharmacy_user
+      POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:?Set a disposable database password}
+    ports: ["127.0.0.1:${LAB_DB_PORT:?}:5432"]
+    labels: {ecosystem.lab: "true"}
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U pharmacy_user -d pharmacy_test]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  app:
+    profiles: [ecosystem-lab]
+    image: ${LAB_APP_IMAGE:?Build an immutable lab image first}
+    environment:
+      DATABASE_URL: postgresql+psycopg://pharmacy_user:${LAB_DB_PASSWORD}@db:5432/pharmacy_test
+      ADMIN_PASSWORD_HASH: ${LAB_ADMIN_HASH:?Set a disposable admin password hash}
+      SESSION_SECRET: ${LAB_SESSION_SECRET:?Set a disposable session secret}
+      APP_VERSION: ${LAB_RELEASE_ID:?Use a commit and image identifier}
+    ports: ["127.0.0.1:${LAB_APP_PORT:?}:80"]
+    labels: {ecosystem.lab: "true"}
+    mem_limit: 192m
+    cpus: 0.5
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1/health',timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

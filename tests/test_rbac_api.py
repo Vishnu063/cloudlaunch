@@ -20,6 +20,10 @@ class RBACApiTests(unittest.TestCase):
         digest = hashlib.pbkdf2_hmac("sha256", b"owner-test-password", salt, 310000).hex()
         os.environ["ADMIN_PASSWORD_HASH"] = "pbkdf2_sha256$310000$" + salt.hex() + "$" + digest
         from app.backend import main
+        from unittest.mock import patch
+        credentials = patch.object(main, "ADMIN_PASSWORD_HASH", os.environ["ADMIN_PASSWORD_HASH"])
+        credentials.start()
+        cls.addClassCleanup(credentials.stop)
         cls.main = main
         main.Base.metadata.create_all(main.engine)
         with main.SessionLocal() as session:
@@ -35,7 +39,7 @@ class RBACApiTests(unittest.TestCase):
             session.commit()
 
     def client(self, role):
-        client = TestClient(self.main.app)
+        client = TestClient(self.main.app, base_url="https://testserver")
         self.addCleanup(client.close)
         data = ({"password": "owner-test-password"} if role == "owner" else
                 {"username": "rbac_" + role, "password": "staff-test-password"})
@@ -44,7 +48,7 @@ class RBACApiTests(unittest.TestCase):
         return client
 
     def test_anonymous_is_denied(self):
-        client = TestClient(self.main.app)
+        client = TestClient(self.main.app, base_url="https://testserver")
         self.addCleanup(client.close)
         self.assertEqual(client.get("/api/medicines").status_code, 401)
         self.assertEqual(client.get("/api/users").status_code, 401)

@@ -2346,3 +2346,25 @@ def dashboard():
 
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+@app.get("/metrics")
+def metrics():
+    """Small scrape surface: database readiness and bounded immutable release ID."""
+    from fastapi.responses import PlainTextResponse
+    import re
+    try:
+        with engine.connect() as conn:
+            conn.execute(select(1))
+        database_healthy = 1
+    except Exception:
+        database_healthy = 0
+    release = os.getenv("APP_VERSION", "local")
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", release):
+        release = "unknown"
+    return PlainTextResponse(
+        "# TYPE cloudlaunch_database_healthy gauge\n"
+        f"cloudlaunch_database_healthy {database_healthy}\n"
+        "# TYPE cloudlaunch_release_info gauge\n"
+        f'cloudlaunch_release_info{{release_id="{release}"}} 1\n',
+        media_type="text/plain; version=0.0.4")

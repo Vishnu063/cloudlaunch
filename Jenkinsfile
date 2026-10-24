@@ -47,6 +47,10 @@ pipeline {
             }
         }
 
+        stage('Report deployment started') {
+            steps { sh 'sh integrations/report-deployment.sh started || echo "Deployment event delivery unconfirmed"' }
+        }
+
         stage('Deploy Pharmacy App') {
             steps {
                 script {
@@ -59,6 +63,14 @@ pipeline {
                             docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                               -p cloudlaunch -f compose.yml build app
 
+                            RELEASE_ID="$(git rev-parse --verify HEAD)-${BUILD_NUMBER}"
+                            docker tag cloudlaunch-app "cloudlaunch-app:$RELEASE_ID"
+                            if [ "${CLOUDLAUNCH_TRIVY_ENABLED:-false}" = true ]; then
+                                IMAGE_ID=$(docker image inspect cloudlaunch-app --format='{{.Id}}')
+                                trivy image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL \
+                                  --format json --output trivy-report.json "$IMAGE_ID"
+                            fi
+                            export APP_VERSION="$RELEASE_ID"
                             docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                               -p cloudlaunch -f compose.yml up -d --no-deps app
                         '''
@@ -81,19 +93,45 @@ pipeline {
                             error('Pharmacy health check failed')
                         }
 
+                        sh 'sh integrations/report-deployment.sh succeeded || echo "Deployment event delivery unconfirmed"'
                         echo 'Pharmacy deployment successful.'
                     } catch (err) {
                         sh '''
-                            if docker image inspect cloudlaunch-app:rollback >/dev/null 2>&1; then
+                            set -eu
+                            sh integrations/report-deployment.sh failed || echo 'Deployment event delivery unconfirmed'
+                            if [ "${CLOUDLAUNCH_ALLOW_ROLLBACK:-false}" = true ] && \
+                              docker image inspect cloudlaunch-app:rollback >/dev/null 2>&1; then
+                                sh integrations/report-deployment.sh rollback_started || true
                                 docker tag cloudlaunch-app:rollback cloudlaunch-app
                                 docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                                   -p cloudlaunch -f compose.yml up -d --no-build --no-deps app
+                                rollback_ok=false
+                                for i in $(seq 1 45); do
+                                    status=$(docker inspect --format='{{.State.Health.Status}}' pharmacy-app 2>/dev/null || echo missing)
+                                    current_image=$(docker inspect --format='{{.Image}}' pharmacy-app 2>/dev/null || echo missing)
+                                    expected_image=$(docker image inspect cloudlaunch-app:rollback --format='{{.Id}}')
+                                    if [ "$status" = healthy ] && [ "$current_image" = "$expected_image" ]; then rollback_ok=true; break; fi
+                                    [ "$status" = unhealthy ] && break
+                                    sleep 2
+                                done
+                                if [ "$rollback_ok" = true ]; then
+                                    sh integrations/report-deployment.sh rollback_succeeded || true
+                                else
+                                    sh integrations/report-deployment.sh rollback_failed || true
+                                fi
+                            else
+                                echo 'Automatic rollback disabled or no retained rollback image; review the failed deployment.'
                             fi
                         '''
-                        error("Deployment failed; rollback attempted. Check pharmacy-app logs. ${err}")
+                        error("Deployment failed. Review rollback policy, deployment events and pharmacy-app logs. ${err}")
                     }
                 }
             }
+        }
+    }
+    post {
+        failure {
+            sh 'sh integrations/report-deployment.sh failed || echo "Deployment event delivery unconfirmed"'
         }
     }
 }

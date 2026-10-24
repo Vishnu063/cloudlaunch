@@ -27,6 +27,7 @@ services:
       DATABASE_URL: postgresql+psycopg://pharmacy_user:${POSTGRES_PASSWORD}@db:5432/pharmacy
       ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?Set ADMIN_PASSWORD_HASH in .env}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      APP_VERSION: ${APP_VERSION:-local}
     ports:
       - "127.0.0.1:8082:80"
     depends_on:

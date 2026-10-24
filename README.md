@@ -1,5 +1,11 @@
 # PharmaCare — Pharmacy Management System
 
+## Optional ecosystem integration
+
+Optional Ops Pilot deployment events, bounded release/DB metrics, immutable release tags, opt-in Trivy and an explicitly authorized rollback policy. The disposable monitored recovery passed; production integration remains unverified.
+
+[Architecture, configuration, test evidence and known limits](integrations/README.md).
+
 A pharmacy management project built with **FastAPI, PostgreSQL, Docker Compose, and Nginx**. It covers stock and medicine batches, suppliers, purchasing, sales, customers, prescription records, reporting, and staff accounts with role-based access control (RBAC).
 
 > **Project status:** Actively developed demo. The application has been deployed on AWS EC2 and checked through an HTTPS health endpoint. **Do not use with real patient data or as a production pharmacy system yet.** Backup/restore verification, a full end-to-end test pass, and additional security/compliance work remain open.
