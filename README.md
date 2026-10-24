@@ -243,3 +243,15 @@ This project is provided for learning and development. Its current behavior shou
 ## Optional DevOps ecosystem integration
 
 CloudLaunch remains the build/deployment owner. The existing pharmacy pipeline is preserved; optional structured release reporting, immutable Git release tags and Trivy checks are described in [the integration guide](docs/ECOSYSTEM.md). The separate `demo/Dockerfile` and `scripts/deploy-ecosystem-demo.py` build a stateless owned sample for the cross-project failure/recovery lab; they never touch pharmacy containers, data or credentials. No model or paid API is introduced. Reporting tests run separately from the existing pharmacy tests; Jenkins runtime, live customer deployment and production rollback are not claimed by this repository change.
+
+Integration evidence: [reporting/cleanup CI](https://github.com/Vishnu063/cloudlaunch/actions/runs/40072701765) and [actual five-project recovery](https://github.com/Vishnu063/ops-pilot/actions/runs/40074300156). The latter exercises this repository's separate stateless sample, not the pharmacy deployment or Jenkins/Trivy runtime. [Full architecture, implementation refs, measured resources and remaining gates](https://github.com/Vishnu063/ops-pilot/blob/feat/unified-devops-engineer/docs/ECOSYSTEM-RESULTS.md).
+
+```mermaid
+flowchart LR
+  C[CloudLaunch build and health] --> P[Prometheus / Alertmanager]
+  C --> E[Optional structured events]
+  E --> O[Ops Pilot owner approval]
+  P --> O
+  O --> V[Verified recovery / report]
+```
+
