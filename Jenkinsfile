@@ -53,8 +53,15 @@ pipeline {
                 sh '''
                     set -eu
                     command -v trivy >/dev/null
-                    trivy fs --exit-code 1 --severity HIGH,CRITICAL --scanners vuln --no-progress .
+                    trivy fs --timeout 2m --exit-code 1 --severity HIGH,CRITICAL --scanners vuln --no-progress .
                 '''
+            }
+            post {
+                failure {
+                    script {
+                        sh(script: 'python3 scripts/report-release.py security_failed', returnStatus: true)
+                    }
+                }
             }
         }
 
