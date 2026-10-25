@@ -1,0 +1,2 @@
+# Optional build-agent integration only. Does not change app runtime requirements.
+devops-triage-assistant @ https://github.com/Vishnu063/devops-triage-assistant/archive/c87d3f6cc985d20d3950a4369e037542dd99113e.zip

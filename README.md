@@ -238,3 +238,25 @@ A complete recovery plan still needs successful backups, off-instance encrypted 
 **Repository:** [Vishnu063/cloudlaunch](https://github.com/Vishnu063/cloudlaunch). Contributions should avoid committing secrets, sensitive data, generated backup files or local machine state.
 
 This project is provided for learning and development. Its current behavior should not be interpreted as certified medical, financial or regulatory functionality.
+
+
+## Optional DevOps ecosystem integration
+
+CloudLaunch remains the build/deployment owner. The existing pharmacy pipeline is preserved; optional structured release reporting, immutable Git release tags and Trivy checks are described in [the integration guide](docs/ECOSYSTEM.md). The separate `demo/Dockerfile` and `scripts/deploy-ecosystem-demo.py` build a stateless owned sample for the cross-project failure/recovery lab; they never touch pharmacy containers, data or credentials. No model or paid API is introduced. Reporting tests run separately from the existing pharmacy tests; Jenkins runtime, live customer deployment and production rollback are not claimed by this repository change.
+
+Integration evidence: [reporting/cleanup CI](https://github.com/Vishnu063/cloudlaunch/actions/runs/40072701765) and [actual five-project recovery](https://github.com/Vishnu063/ops-pilot/actions/runs/40074300156). The latter exercises this repository's separate stateless sample, not the pharmacy deployment or Jenkins/Trivy runtime. [Full architecture, implementation refs, measured resources and remaining gates](https://github.com/Vishnu063/ops-pilot/blob/feat/unified-devops-engineer/docs/ECOSYSTEM-RESULTS.md).
+
+```mermaid
+flowchart LR
+  C[CloudLaunch build and health] --> P[Prometheus / Alertmanager]
+  C --> E[Optional structured events]
+  E --> O[Ops Pilot owner approval]
+  P --> O
+  O --> V[Verified recovery / report]
+```
+
+
+## Self-hosted integration review (2026-10-25)
+
+[Ops Pilot setup and read-only permission guide](https://github.com/Vishnu063/ops-pilot/blob/feat/public-selfhosted-readiness/docs/SELF-HOSTING.md) · [Current cross-project readiness and actual evidence](https://github.com/Vishnu063/ops-pilot/blob/feat/public-selfhosted-readiness/docs/PUBLIC-READINESS.md).
+The release adapter remains optional; Jenkins deployments emit authenticated deployment outcomes through the existing CloudLaunch contract. Ops Pilot can investigate a separately configured Jenkins numbered build with read-only credentials. A disposable failed pipeline is not acceptance of this pharmacy pipeline, its database or a customer target. Existing application behavior is preserved.

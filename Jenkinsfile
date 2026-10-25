@@ -47,10 +47,29 @@ pipeline {
             }
         }
 
+        stage('Optional Trivy security gate') {
+            when { expression { env.CLOUDLAUNCH_TRIVY == '1' } }
+            steps {
+                sh '''
+                    set -eu
+                    command -v trivy >/dev/null
+                    trivy fs --timeout 2m --exit-code 1 --severity HIGH,CRITICAL --scanners vuln --no-progress .
+                '''
+            }
+            post {
+                failure {
+                    script {
+                        sh(script: 'python3 scripts/report-release.py security_failed', returnStatus: true)
+                    }
+                }
+            }
+        }
+
         stage('Deploy Pharmacy App') {
             steps {
                 script {
                     try {
+                        sh(script: 'python3 scripts/report-release.py started', returnStatus: true)
                         sh '''
                             set -eu
                             OLD_IMAGE=$(docker inspect --format='{{.Image}}' pharmacy-app)
@@ -58,6 +77,12 @@ pipeline {
 
                             docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                               -p cloudlaunch -f compose.yml build app
+
+                            if [ "${CLOUDLAUNCH_TRIVY:-0}" = "1" ]; then
+                                trivy image --timeout 2m --exit-code 1 --severity HIGH,CRITICAL --no-progress cloudlaunch-app
+                            fi
+                            RELEASE_ID=$(git rev-parse HEAD)
+                            docker tag cloudlaunch-app "cloudlaunch-app:${RELEASE_ID}"
 
                             docker compose --env-file /home/ubuntu/cloudlaunch/.env \
                               -p cloudlaunch -f compose.yml up -d --no-deps app
@@ -81,15 +106,26 @@ pipeline {
                             error('Pharmacy health check failed')
                         }
 
+                        sh(script: 'python3 scripts/report-release.py healthy', returnStatus: true)
                         echo 'Pharmacy deployment successful.'
                     } catch (err) {
-                        sh '''
-                            if docker image inspect cloudlaunch-app:rollback >/dev/null 2>&1; then
-                                docker tag cloudlaunch-app:rollback cloudlaunch-app
-                                docker compose --env-file /home/ubuntu/cloudlaunch/.env \
-                                  -p cloudlaunch -f compose.yml up -d --no-build --no-deps app
-                            fi
-                        '''
+                        sh(script: 'python3 scripts/report-release.py failed', returnStatus: true)
+                        sh(script: 'python3 scripts/report-release.py rollback_started', returnStatus: true)
+                        int rollbackResult = sh(script: '''
+                            set -eu
+                            docker image inspect cloudlaunch-app:rollback >/dev/null
+                            docker tag cloudlaunch-app:rollback cloudlaunch-app
+                            docker compose --env-file /home/ubuntu/cloudlaunch/.env \
+                              -p cloudlaunch -f compose.yml up -d --no-build --no-deps app
+                            for i in $(seq 1 45); do
+                                status=$(docker inspect --format='{{.State.Health.Status}}' pharmacy-app 2>/dev/null || echo missing)
+                                [ "$status" = "healthy" ] && exit 0
+                                [ "$status" = "unhealthy" ] && exit 1
+                                sleep 2
+                            done
+                            exit 1
+                        ''', returnStatus: true)
+                        sh(script: 'python3 scripts/report-release.py ' + (rollbackResult == 0 ? 'rollback_verified' : 'rollback_failed'), returnStatus: true)
                         error("Deployment failed; rollback attempted. Check pharmacy-app logs. ${err}")
                     }
                 }
@@ -97,3 +133,4 @@ pipeline {
         }
     }
 }
+
