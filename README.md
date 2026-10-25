@@ -255,3 +255,8 @@ flowchart LR
   O --> V[Verified recovery / report]
 ```
 
+
+## Self-hosted integration review (2026-10-25)
+
+[Ops Pilot setup and read-only permission guide](https://github.com/Vishnu063/ops-pilot/blob/feat/public-selfhosted-readiness/docs/SELF-HOSTING.md) · [Current cross-project readiness and actual evidence](https://github.com/Vishnu063/ops-pilot/blob/feat/public-selfhosted-readiness/docs/PUBLIC-READINESS.md).
+The release adapter remains optional; Jenkins deployments emit authenticated deployment outcomes through the existing CloudLaunch contract. Ops Pilot can investigate a separately configured Jenkins numbered build with read-only credentials. A disposable failed pipeline is not acceptance of this pharmacy pipeline, its database or a customer target. Existing application behavior is preserved.
